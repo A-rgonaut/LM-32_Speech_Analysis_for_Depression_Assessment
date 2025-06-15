@@ -44,3 +44,14 @@ def load_features_from_dataset(df, dataset_name, features_type):
         X_list.append(features.flatten())
     
     return np.array(X_list)
+
+def get_audio_paths(df, dataset_name):
+    audio_paths = []
+    for participant_id in df['Participant_ID']:
+        dir_name = f"{participant_id}_P"
+        wav_path = os.path.join(dataset_name, dir_name, f"{participant_id}_AUDIO.wav")
+        if os.path.isfile(wav_path):
+            audio_paths.append(wav_path)
+        else:
+            print(f"Warning: File non trovato per {participant_id} in {wav_path}")
+    return audio_paths
