@@ -55,3 +55,24 @@ def get_audio_paths(df, dataset_name):
         else:
             print(f"Warning: File non trovato per {participant_id} in {wav_path}")
     return audio_paths
+
+def get_split_audio_paths(df, dataset_name):
+    """
+    For each participant in df, collect all 10s audio segment paths in their directory.
+    Returns a list of paths and a list of corresponding labels.
+    """
+    audio_paths = []
+    labels = []
+    for idx, row in df.iterrows():
+        participant_id = int(row['Participant_ID'])  # Ensure integer for directory name
+        label = int(row['PHQ8_Binary']) if 'PHQ8_Binary' in row else int(row['PHQ_Binary'])
+        dir_name = f"{participant_id}_P"
+        part_dir = os.path.join(dataset_name, dir_name)
+        if os.path.isdir(part_dir):
+            for fname in os.listdir(part_dir):
+                if fname.endswith('.wav') and '_part' in fname:
+                    audio_paths.append(os.path.join(part_dir, fname))
+                    labels.append(label)
+        else:
+            print(f"Warning: Directory not found for {participant_id} in {part_dir}")
+    return audio_paths, labels
