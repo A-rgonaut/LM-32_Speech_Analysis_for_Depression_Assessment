@@ -69,10 +69,9 @@ def eval_model_by_file_aggregation(model, data_loader, device):
     file_labels = {} # Dizionario per memorizzare l'etichetta di ogni file
     
     with torch.no_grad():
-        for batch in data_loader:
+        for batch in tqdm(data_loader):
             batch['input_values'] = batch['input_values'].to(device)
             batch['label'] = batch['label'].to(device)
-            batch['filename'] = batch['filename'].to(device) 
             filenames = batch['filename']    
 
             outputs = model(batch)
@@ -80,7 +79,7 @@ def eval_model_by_file_aggregation(model, data_loader, device):
             for i in range(len(filenames)):
                 filename = filenames[i]
                 score = outputs[i].item() # La probabilità predetta
-                label = batch['label'].item()
+                label = batch['label'][i].item()
                 
                 file_scores[filename].append(score)
                 
@@ -100,14 +99,14 @@ def eval_model_by_file_aggregation(model, data_loader, device):
             true_labels.append(file_labels[filename])
     
         accuracy = accuracy_score(true_labels, final_predictions)
-
+        f1 = f1_score(true_labels, final_predictions, average='macro')
         # La Confusion Matrix ci dà TP, TN, FP, FN per calcolare sensitività e specificità
         tn, fp, fn, tp = confusion_matrix(true_labels, final_predictions).ravel()
         
         sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
-        
-        return accuracy, sensitivity, specificity
+
+        return accuracy, f1, sensitivity, specificity
 
 def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, device, epoch, num_epochs):
     model.train()

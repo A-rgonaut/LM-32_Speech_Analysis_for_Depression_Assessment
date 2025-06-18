@@ -22,14 +22,14 @@ def main():
     # --- 1. CONFIGURAZIONE DELL'ESPERIMENTO ---
     print("--- Configurazione dell'esperimento CNN ---")
     SEED = 42
-    DATASET_NAME = "datasets/DAIC-WOZ-Cleaned"
+    DATASET_NAME = "src/datasets/DAIC-WOZ-Cleaned"
     MODEL_SAVE_PATH = "cnn_best.pth"
     
     # Iperparametri
     BATCH_SIZE = 512
     LEARNING_RATE = 0.01
     NUM_EPOCHS = 100
-    NUM_WORKERS = 8
+    NUM_WORKERS = os.cpu_count() // 2 if os.cpu_count() > 1 else 0
 
     # Impostazione del seed per la riproducibilità
     np.random.seed(SEED)
@@ -92,8 +92,9 @@ def main():
 
         if early_stopping(val_f1):
             print(f"Early stopping attivato dopo {epoch+1} epoche.")
-            break
-            
+            break       
+
+
     print("\n--- Training Completato ---")
 
     # --- 5. TEST FINALE SUL MIGLIOR MODELLO ---
