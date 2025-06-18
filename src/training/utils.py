@@ -76,3 +76,39 @@ def get_split_audio_paths(df, dataset_name):
         else:
             print(f"Warning: Directory not found for {participant_id} in {part_dir}")
     return audio_paths, labels
+
+def print_model_summary(model):
+    print("-"*89)
+    print(f"| Layer Name                                              | # of Parameters | Trainable |")
+    print("-"*89)
+    total_num_trainable_params = 0
+    for layer_name, layer_params in model.named_parameters():
+        if layer_params.requires_grad:
+            total_num_trainable_params += layer_params.numel()
+        print(f"| {layer_name:<55} | {layer_params.numel():<15} | {str(layer_params.requires_grad):<9} |")
+    print("-"*89)
+    print(f"| Total # of Parameters: {total_num_trainable_params:<62} |" )
+    print("-"*89)
+
+class EarlyStopping:
+    def __init__(self, patience=3, min_delta=0.0, mode='max'):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self.counter = 0
+        self.best_score = -np.inf if mode == 'max' else np.inf
+
+    def __call__(self, current_score):
+        if self.mode == 'max':
+            improvement = (current_score - self.best_score) > self.min_delta
+        else:
+            improvement = (self.best_score - current_score) > self.min_delta
+
+        if improvement:
+            self.best_score = current_score
+            self.counter = 0
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True  # Early stop
+        return False
