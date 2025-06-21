@@ -68,7 +68,7 @@ def main():
     print("\n--- Inizializzazione modello ---")
     model = CNNMLP().to(device)
     print_model_summary(model)
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE)
     scheduler = None
     criterion = nn.BCELoss()
     early_stopping = EarlyStopping(patience=5, min_delta=0.005, mode='max') 

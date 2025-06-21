@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from transformers import get_linear_schedule_with_warmup
-
+from torch.amp import GradScaler, autocast
 from src.data import AudioDepressionDatasetSSL, collate_fn
 from src.models import DepressionClassifier
 from src.training import (
@@ -22,7 +22,7 @@ def main():
     # --- 1. CONFIGURAZIONE DELL'ESPERIMENTO ---
     print("--- Configurazione dell'esperimento Transformer ---")
     SEED = 42
-    DATASET_NAME = "datasets/DAIC-WOZ-Cleaned"
+    DATASET_NAME = "src/datasets/DAIC-WOZ-Cleaned"
     MODEL_NAME_HF = "facebook/wav2vec2-base" # Nome del modello da Hugging Face
     MODEL_SAVE_PATH = "transformer_best.pth"
     
@@ -30,11 +30,11 @@ def main():
     BATCH_SIZE = 2  
     LEARNING_RATE = 3e-5 
     NUM_EPOCHS = 20
-    NUM_WORKERS = 4
+    NUM_WORKERS = os.cpu_count() // 2 if os.cpu_count() > 1 else 0
     
     # Parametri specifici del dataset/modello
-    SEGMENT_LENGTH_SECONDS = 4
-    MAX_SEGMENTS = 20
+    SEGMENT_LENGTH_SECONDS = 7
+    MAX_SEGMENTS = 35
     NUM_CLASSES = 2
     
     # Impostazione del seed per la riproducibilità
@@ -84,9 +84,9 @@ def main():
 
     # --- 3. INIZIALIZZAZIONE MODELLO E COMPONENTI DI TRAINING ---
     print("\n--- Inizializzazione modello ---")
-    model = DepressionClassifier(model_name=MODEL_NAME_HF, num_classes=NUM_CLASSES).to(device)
+    model = DepressionClassifier(model_name=MODEL_NAME_HF,seq_model_type='bilstm',seq_hidden_size=64, num_classes=NUM_CLASSES).to(device)
     print_model_summary(model)
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE, weight_decay=0.01)
     criterion = nn.CrossEntropyLoss() 
     early_stopping = EarlyStopping(patience=5, min_delta=0.01, mode='max')
     
@@ -97,10 +97,10 @@ def main():
     # --- 4. TRAINING LOOP ---
     print("\n--- Inizio Training ---")
     best_val_f1 = -1.0
-
+    scaler = GradScaler()
     for epoch in range(NUM_EPOCHS):
         # Training
-        train_loss, train_acc = train_epoch(model, train_dataloader, criterion, optimizer, scheduler, device, epoch, NUM_EPOCHS)
+        train_loss, train_acc = train_epoch(model, train_dataloader, criterion, optimizer, scheduler, device, epoch, NUM_EPOCHS,scaler=scaler)
         
         # Validation
         val_loss, val_acc, val_f1 = eval_model(model, dev_dataloader, criterion, device)
