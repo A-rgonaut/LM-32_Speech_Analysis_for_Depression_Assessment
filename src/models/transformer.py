@@ -21,8 +21,9 @@ class AttentionPoolingLayer(nn.Module):
         # Apply the mask before softmax to ignore padding
         if mask is not None:
             # .unsqueeze(-1): (bs, seq_len) -> (bs, seq_len, 1)
+            fill = torch.finfo(weights.dtype).min
             # Assign a very negative value where the mask is True (padding)
-            weights.masked_fill_(mask.unsqueeze(-1), -1e9)
+            weights.masked_fill_(mask.unsqueeze(-1), fill)
 
         weights = torch.softmax(weights, dim=1)  # Now masked elements will have ~0 weight
 
@@ -38,7 +39,9 @@ class DepressionClassifier(nn.Module):
         # SSL model loading & config
         self.ssl_model = AutoModel.from_pretrained(model_name, output_hidden_states=True)
         self.ssl_hidden_size = self.ssl_model.config.hidden_size # e.g. 768
-
+        # --- FREEZE WAV2VEC2 WEIGHTS ---
+        for param in self.ssl_model.parameters():
+            param.requires_grad = False
         # Weighted sum of SSL model's hidden layers
         num_ssl_layers = self.ssl_model.config.num_hidden_layers
         layers_to_aggregate = num_ssl_layers + 1 # +1 for the initial embeddings
