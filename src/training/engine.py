@@ -5,7 +5,7 @@ from sklearn.metrics import f1_score
 from collections import defaultdict
 import numpy as np
 from sklearn.metrics import accuracy_score, confusion_matrix
-
+from torch.amp import GradScaler, autocast
 def train_epoch_binary(model, data_loader, loss_fn, optimizer, scheduler, device, epoch, num_epochs):
     model.train()
     total_loss, correct_predictions = 0, 0
@@ -108,7 +108,7 @@ def eval_model_by_file_aggregation(model, data_loader, device):
 
         return accuracy, f1, sensitivity, specificity
 
-def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, device, epoch, num_epochs):
+def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, device, epoch, num_epochs,scaler = None):
     model.train()
     total_loss, correct_predictions = 0, 0
     train_pbar = tqdm(enumerate(data_loader), 
@@ -122,12 +122,12 @@ def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, device, epoch
             batch['attention_mask'] = batch['attention_mask'].to(device)
         
         optimizer.zero_grad()
-
         # Calcolo dei logits grezzi
-        outputs = model(batch)
+        with autocast('cuda'):
+            outputs = model(batch)
 
-        # Calcolo della loss (i logits vengono passati così come sono)
-        loss = loss_fn(outputs, batch['label'])
+            # Calcolo della loss (i logits vengono passati così come sono)
+            loss = loss_fn(outputs, batch['label'])
         total_loss += loss.item()
 
         # Calcolo delle predizioni: per multi-classe usiamo argmax sui logits
@@ -136,8 +136,10 @@ def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, device, epoch
         correct_predictions += torch.sum(preds == batch['label'])
 
         # Backpropagation e aggiornamento dei pesi
-        loss.backward()
-        optimizer.step()
+        if scaler:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
         if scheduler:
             scheduler.step()  # Aggiorna lo scheduler se necessario
         
@@ -153,13 +155,14 @@ def eval_model(model, data_loader, loss_fn, device):
     predictions, targets = [], []
     with torch.no_grad():
         for batch in data_loader:
-            batch['input_values'] = batch['input_values'].to(device)
+            batch['input_values'] = batch['input_values'].to(device,
+    dtype=next(model.parameters()).dtype)
             batch['label'] = batch['label'].to(device)
             if 'attention_mask' in batch:
                 batch['attention_mask'] = batch['attention_mask'].to(device)
 
             outputs = model(batch)
-            loss = loss_fn(outputs,  batch['label'])
+            loss = loss_fn(outputs.float(),  batch['label'])
             total_loss += loss.item()
 
             preds = torch.argmax(outputs,dim=1)
