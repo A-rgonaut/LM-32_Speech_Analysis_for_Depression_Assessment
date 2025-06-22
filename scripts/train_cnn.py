@@ -1,11 +1,12 @@
 import os
+import comet_ml
 import torch
 import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-
+from comet_ml import Experiment
 from src.data import AudioDepressionDataset
 from src.models import CNNMLP
 from src.training import (
@@ -24,7 +25,11 @@ def main():
     SEED = 42
     DATASET_NAME = "src/datasets/DAIC-WOZ-Cleaned"
     MODEL_SAVE_PATH = "cnn_best.pth"
-    
+    experiment = Experiment(
+        api_key    = "SbkM6WJppPzbTkTw07ulQv49t",
+        project_name = "LM-32-2025-progetto-speech",
+        workspace  = "ashenclock7613"          # cambia con il tuo workspace
+    )
     # Iperparametri
     BATCH_SIZE = 512
     LEARNING_RATE = 0.01
@@ -72,7 +77,7 @@ def main():
     scheduler = None
     criterion = nn.BCELoss()
     early_stopping = EarlyStopping(patience=5, min_delta=0.005, mode='max') 
-
+    experiment.set_model_graph(model)
     # --- 4. TRAINING LOOP ---
     print("\n--- Inizio Training ---")
     best_val_f1 = -1.0
@@ -80,11 +85,14 @@ def main():
     for epoch in range(NUM_EPOCHS):
         # Training
         train_loss, train_acc = train_epoch_binary(model, train_dataloader, criterion, optimizer, scheduler, device, epoch, NUM_EPOCHS)
-        
+        experiment.log_metric("train/loss", train_loss, step=epoch)
+        experiment.log_metric("train/accuracy", train_acc, step=epoch)
         # Validation
         val_loss, val_acc, val_f1 = eval_model_binary(model, dev_dataloader, criterion, device)
         print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f}")
-
+        experiment.log_metric("val/loss", val_loss, step=epoch)
+        experiment.log_metric("val/accuracy", val_acc, step=epoch)
+        experiment.log_metric("val/f1", val_f1, step=epoch)
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1
             torch.save(model.state_dict(), MODEL_SAVE_PATH)
