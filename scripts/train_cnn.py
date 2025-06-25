@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
 from dotenv import load_dotenv
 from comet_ml import Experiment
+from torch.utils.data import DataLoader
 from src.data import AudioDepressionDataset
 from src.models import CNNMLP
 from src.training import (

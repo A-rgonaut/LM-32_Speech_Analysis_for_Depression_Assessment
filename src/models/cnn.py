@@ -1,6 +1,7 @@
 import torch.nn as nn
 
 class CNNMLP(nn.Module):
+    
     def __init__(self, dropout_rate=0.25):
         super(CNNMLP, self).__init__()
         
@@ -70,4 +71,5 @@ class CNNMLP(nn.Module):
         x = self.glob_avg_pool(x) # [batch_size, 64, 1]
         x_flattened = self.flatten(x) # [batch_size, 64 * 1] = [batch_size, 64]
         output = self.mlp_block(x_flattened)
+
         return output

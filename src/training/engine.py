@@ -1,9 +1,9 @@
 import torch
+import numpy as np
 from torch import nn
 from tqdm.auto import tqdm
-from sklearn.metrics import f1_score
 from collections import defaultdict
-import numpy as np
+from sklearn.metrics import f1_score
 from sklearn.metrics import accuracy_score, confusion_matrix
 
 def train_epoch_binary(model, data_loader, loss_fn, optimizer, scheduler, device, epoch, num_epochs):
@@ -60,6 +60,7 @@ def eval_model_binary(model, data_loader, loss_fn, device):
             targets.extend(batch['label'].cpu().numpy())
 
     f1 = f1_score(targets, predictions, average='macro')
+
     return total_loss / len(data_loader), correct_predictions.double() / len(data_loader.dataset), f1
 
 def eval_model_by_file_aggregation(model, data_loader, device):
@@ -141,6 +142,7 @@ def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, device, epoch
 
     avg_loss = total_loss / len(data_loader)
     accuracy = correct_predictions.double() / len(data_loader.dataset)
+
     return avg_loss, accuracy
 
 def eval_model(model, data_loader, loss_fn, device):
@@ -166,4 +168,6 @@ def eval_model(model, data_loader, loss_fn, device):
             targets.extend(batch['label'].cpu().numpy())
 
     f1 = f1_score(targets, predictions, average='macro')
+
     return total_loss / len(data_loader), correct_predictions.double() / len(data_loader.dataset), f1
+

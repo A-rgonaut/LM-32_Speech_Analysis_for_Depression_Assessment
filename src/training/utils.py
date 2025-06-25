@@ -1,5 +1,5 @@
-import numpy as np
 import os
+import numpy as np
 
 def load_labels_from_dataset(df):
     """
@@ -54,6 +54,7 @@ def get_audio_paths(df, dataset_name):
             audio_paths.append(wav_path)
         else:
             print(f"Warning: File non trovato per {participant_id} in {wav_path}")
+            
     return audio_paths
 
 def get_split_audio_paths(df, dataset_name):
@@ -75,6 +76,7 @@ def get_split_audio_paths(df, dataset_name):
                     labels.append(label)
         else:
             print(f"Warning: Directory not found for {participant_id} in {part_dir}")
+
     return audio_paths, labels
 
 def print_model_summary(model):
@@ -131,4 +133,5 @@ class EarlyStopping:
             self.counter += 1
             if self.counter >= self.patience:
                 return True  # Early stop
+            
         return False

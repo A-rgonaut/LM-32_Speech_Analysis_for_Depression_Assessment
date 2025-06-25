@@ -1,8 +1,9 @@
-from torch import nn
 import torch
+from torch import nn
 from transformers import AutoModel
 
 class AttentionPoolingLayer(nn.Module):
+    
     def __init__(self, embed_dim):
         super().__init__()
         self.linear = nn.Linear(embed_dim, 1)
@@ -29,6 +30,7 @@ class AttentionPoolingLayer(nn.Module):
 
         # Weighted sum (bs, seq_len, 1) * (bs, seq_len, embed_dim) -> (bs, embed_dim)
         x = torch.sum(weights * x, dim=1) 
+
         return x
     
 class DepressionClassifier(nn.Module):

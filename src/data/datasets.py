@@ -1,12 +1,13 @@
+import os
 import torch
 import torchaudio
 import librosa
 import numpy as np
 from torch.utils.data import Dataset
 from transformers import AutoFeatureExtractor
-import os
 
 class AudioDepressionDataset(Dataset):
+
     def __init__(self, audio_paths, labels, return_filename=False, sample_rate=16_000, segment_ms=250, hop_ms=50):
         self.audio_paths = audio_paths
         self.labels = labels
@@ -70,10 +71,12 @@ class AudioDepressionDatasetSSL(Dataset):
         return len(self.audio_paths)
     
     def _load_audio(self, audio_path):
+        
         audio, _ = librosa.load(audio_path, sr=self.sample_rate)
         if len(audio.shape) > 1:
             audio = audio.mean(axis=0)
         audio = audio / np.max(np.abs(audio))
+
         return audio
     
     def _segment_audio(self, audio):
