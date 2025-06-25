@@ -1,0 +1,13 @@
+Per audio:
+1. Togliere Ellie dagli audio (s41598-024-63556-0.pdf)
+2. Aggiungere rumore (e cercare di bilanciare un po le classe aggiungendo piu audio con piu rumori nella classe 1) (Identification_of_depression_state_based_on_multi-.pdf)
+
+Per testo: (fpsyt-14-1160291.pdf)
+1. Standardizzare le annotazioni (e.g., {⟨laughter⟩, [laughter]}→*laughter*,
+{⟨sigh⟩}→*sigh*).
+2. Rimozione di annotazioni irrilevanti (([syncing], [sync], ⟨sync⟩), scrubbed_entry, xxxx)
+3. Rimozioni di _ in acronimi (l_a→la)
+
+Data aug:
+1. Prendere da edaic-woz solo gli audio con classe 1 (computation-13-00009.pdf), e rifare le trascrizioni 
+2. Fare tone change di qualche campione classe 1 (computation-13-00009.pdf)

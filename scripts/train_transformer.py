@@ -5,8 +5,6 @@ import pandas as pd
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from transformers import get_linear_schedule_with_warmup
-from torch.amp import GradScaler, autocast
 from src.data import AudioDepressionDatasetSSL, collate_fn
 from src.models import DepressionClassifier
 from src.training import (
@@ -22,8 +20,8 @@ def main():
     # --- 1. CONFIGURAZIONE DELL'ESPERIMENTO ---
     print("--- Configurazione dell'esperimento Transformer ---")
     SEED = 42
-    DATASET_NAME = "src/datasets/DAIC-WOZ-Cleaned"
-    MODEL_NAME_HF = "facebook/wav2vec2-base" # Nome del modello da Hugging Face
+    DATASET_NAME = "datasets/DAIC-WOZ-Cleaned"
+    MODEL_NAME_HF = "facebook/wav2vec2-base" 
     MODEL_SAVE_PATH = "transformer_best.pth"
     
     # Iperparametri 
@@ -91,20 +89,19 @@ def main():
     early_stopping = EarlyStopping(patience=5, min_delta=0.01, mode='max')
     
     # Scheduler del learning rate
-    total_steps = len(train_dataloader) * NUM_EPOCHS
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=total_steps)
+    scheduler = None
 
     # --- 4. TRAINING LOOP ---
     print("\n--- Inizio Training ---")
     best_val_f1 = -1.0
-    scaler = GradScaler()
+
     for epoch in range(NUM_EPOCHS):
         # Training
-        train_loss, train_acc = train_epoch(model, train_dataloader, criterion, optimizer, scheduler, device, epoch, NUM_EPOCHS,scaler=scaler)
-        
+        train_loss, train_acc = train_epoch(model, train_dataloader, criterion, optimizer, scheduler, device, epoch, NUM_EPOCHS)
+
         # Validation
         val_loss, val_acc, val_f1 = eval_model(model, dev_dataloader, criterion, device)
-        print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f}")
+        print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f}")
 
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1

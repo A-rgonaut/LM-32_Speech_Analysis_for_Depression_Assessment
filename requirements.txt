@@ -1,9 +1,14 @@
+disvoice
+joblib
 torch
 torchaudio
 transformers
 numpy
 pandas
 librosa
+soundfile
 scikit-learn
 tqdm
 matplotlib
+comet_ml
+dotenv

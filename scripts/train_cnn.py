@@ -1,18 +1,17 @@
 import os
-import comet_ml
 import torch
 import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from dotenv import load_dotenv
 from comet_ml import Experiment
 from src.data import AudioDepressionDataset
 from src.models import CNNMLP
 from src.training import (
     train_epoch_binary, 
     eval_model_binary, 
-    eval_model_by_file_aggregation,
     EarlyStopping, 
     load_labels_from_dataset, 
     get_audio_paths,    
@@ -23,13 +22,16 @@ def main():
     # --- 1. CONFIGURAZIONE DELL'ESPERIMENTO ---
     print("--- Configurazione dell'esperimento CNN ---")
     SEED = 42
-    DATASET_NAME = "src/datasets/DAIC-WOZ-Cleaned"
+    DATASET_NAME = "datasets/DAIC-WOZ-Cleaned"
     MODEL_SAVE_PATH = "cnn_best.pth"
+    
+    load_dotenv()
     experiment = Experiment(
-        api_key    = "SbkM6WJppPzbTkTw07ulQv49t",
-        project_name = "LM-32-2025-progetto-speech",
-        workspace  = "ashenclock7613"          # cambia con il tuo workspace
+        api_key=os.getenv("COMET_API_KEY"),
+        project_name=os.getenv("COMET_PROJECT_NAME"),
+        workspace=os.getenv("COMET_WORKSPACE")
     )
+
     # Iperparametri
     BATCH_SIZE = 512
     LEARNING_RATE = 0.01
@@ -78,6 +80,7 @@ def main():
     criterion = nn.BCELoss()
     early_stopping = EarlyStopping(patience=5, min_delta=0.005, mode='max') 
     experiment.set_model_graph(model)
+    
     # --- 4. TRAINING LOOP ---
     print("\n--- Inizio Training ---")
     best_val_f1 = -1.0
@@ -102,29 +105,7 @@ def main():
             print(f"Early stopping attivato dopo {epoch+1} epoche.")
             break       
 
-
     print("\n--- Training Completato ---")
-
-    # --- 5. TEST FINALE SUL MIGLIOR MODELLO ---
-    print("\n--- Inizio Test Finale ---")
-    test_df = pd.read_csv(os.path.join(DATASET_NAME, 'full_test_split.csv'))
-    y_test = load_labels_from_dataset(test_df)
-    test_paths = get_audio_paths(test_df, DATASET_NAME)
-    
-    # Per il test, dobbiamo aggregare per file, quindi `return_filename=True`
-    test_dataset = AudioDepressionDataset(audio_paths=test_paths, labels=y_test, return_filename=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
-    
-    # Carica il miglior modello e valuta
-    model.load_state_dict(torch.load(MODEL_SAVE_PATH))
-    accuracy, f1, sensitivity, specificity = eval_model_by_file_aggregation(model, test_dataloader, device)
-
-    print("\n=== Risultati del Test (aggregati per file) ===")
-    print(f"  Accuracy:    {accuracy:.4f}")
-    print(f"  F1-Score:    {f1:.4f}")
-    print(f"  Sensitivity: {sensitivity:.4f}")
-    print(f"  Specificity: {specificity:.4f}")
-    print("---------------------------------------------")
 
 if __name__ == '__main__':
     main()

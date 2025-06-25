@@ -78,17 +78,37 @@ def get_split_audio_paths(df, dataset_name):
     return audio_paths, labels
 
 def print_model_summary(model):
-    print("-"*89)
-    print(f"| Layer Name                                              | # of Parameters | Trainable |")
-    print("-"*89)
-    total_num_trainable_params = 0
-    for layer_name, layer_params in model.named_parameters():
-        if layer_params.requires_grad:
-            total_num_trainable_params += layer_params.numel()
-        print(f"| {layer_name:<55} | {layer_params.numel():<15} | {str(layer_params.requires_grad):<9} |")
-    print("-"*89)
-    print(f"| Total # of Parameters: {total_num_trainable_params:<62} |" )
-    print("-"*89)
+    """
+    Stampa un riepilogo dettagliato di un modello PyTorch, inclusi i parametri
+    per layer, il numero totale di parametri e il numero di parametri allenabili.
+    """
+    # Calcolo dei parametri
+    total_params = 0
+    trainable_params = 0
+    
+    # Intestazione della tabella
+    print("-" * 100)
+    print(f"| {'Layer Name':<60} | {'# of Parameters':<15} | {'Trainable':<9} |")
+    print("=" * 100)
+
+    for name, param in model.named_parameters():
+        num_params = param.numel()
+        is_trainable = param.requires_grad
+        
+        # Stampa la riga per il singolo layer/parametro
+        print(f"| {name:<60} | {num_params:<15,} | {str(is_trainable):<9} |")
+        
+        total_params += num_params
+        if is_trainable:
+            trainable_params += num_params
+
+    non_trainable_params = total_params - trainable_params
+    
+    print("-" * 100)
+    print(f"Total trainable params:     {trainable_params:>15,}")
+    print(f"Total non-trainable params: {non_trainable_params:>15,}")
+    print(f"Total params:               {total_params:>15,}")
+    print("-" * 100)
 
 class EarlyStopping:
     def __init__(self, patience=3, min_delta=0.0, mode='max'):

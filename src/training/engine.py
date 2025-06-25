@@ -5,7 +5,7 @@ from sklearn.metrics import f1_score
 from collections import defaultdict
 import numpy as np
 from sklearn.metrics import accuracy_score, confusion_matrix
-from torch.amp import GradScaler, autocast
+
 def train_epoch_binary(model, data_loader, loss_fn, optimizer, scheduler, device, epoch, num_epochs):
     model.train()
     total_loss, correct_predictions = 0, 0
@@ -108,7 +108,7 @@ def eval_model_by_file_aggregation(model, data_loader, device):
 
         return accuracy, f1, sensitivity, specificity
 
-def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, device, epoch, num_epochs,scaler = None):
+def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, device, epoch, num_epochs):
     model.train()
     total_loss, correct_predictions = 0, 0
     train_pbar = tqdm(enumerate(data_loader), 
@@ -122,12 +122,9 @@ def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, device, epoch
             batch['attention_mask'] = batch['attention_mask'].to(device)
         
         optimizer.zero_grad()
-        # Calcolo dei logits grezzi
-        with autocast('cuda'):
-            outputs = model(batch)
 
-            # Calcolo della loss (i logits vengono passati così come sono)
-            loss = loss_fn(outputs, batch['label'])
+        outputs = model(batch)
+        loss = loss_fn(outputs, batch['label'])
         total_loss += loss.item()
 
         # Calcolo delle predizioni: per multi-classe usiamo argmax sui logits
@@ -136,10 +133,7 @@ def train_epoch(model, data_loader, loss_fn, optimizer, scheduler, device, epoch
         correct_predictions += torch.sum(preds == batch['label'])
 
         # Backpropagation e aggiornamento dei pesi
-        if scaler:
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+        optimizer.step()
         if scheduler:
             scheduler.step()  # Aggiorna lo scheduler se necessario
         
