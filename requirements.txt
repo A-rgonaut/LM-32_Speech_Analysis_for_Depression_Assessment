@@ -12,3 +12,5 @@ tqdm
 matplotlib
 comet_ml
 dotenv
+whisperx
+deepmultilingualpunctuation
