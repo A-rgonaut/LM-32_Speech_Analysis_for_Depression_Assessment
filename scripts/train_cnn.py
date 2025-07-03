@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from comet_ml import Experiment
 from torch.utils.data import DataLoader
 from src.data import AudioDepressionDataset
+from sklearn.model_selection import ParameterGrid
 from src.models import CNNMLP
 from src.training import (
     train_epoch_binary, 
@@ -22,7 +23,7 @@ def main():
     # --- 1. CONFIGURAZIONE DELL'ESPERIMENTO ---
     print("--- Configurazione dell'esperimento CNN ---")
     SEED = 42
-    DATASET_NAME = "datasets/DAIC-WOZ-Cleaned"
+    DATASET_NAME = "datasets/DAIC-WOZ"
     MODEL_SAVE_PATH = "cnn_best.pth"
     
     load_dotenv()
@@ -66,46 +67,71 @@ def main():
     train_dataset = AudioDepressionDataset(audio_paths=train_paths, labels=y_train)
     dev_dataset = AudioDepressionDataset(audio_paths=dev_paths, labels=y_dev)
 
-    # Creazione dei DataLoader
-    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
-    dev_dataloader = DataLoader(dev_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+
     print(f"Train segments: {len(train_dataset)}, Dev segments: {len(dev_dataset)}")
 
     # --- 3. INIZIALIZZAZIONE MODELLO E COMPONENTI DI TRAINING ---
     print("\n--- Inizializzazione modello ---")
     model = CNNMLP().to(device)
     print_model_summary(model)
-    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE)
     scheduler = None
     criterion = nn.BCELoss()
     early_stopping = EarlyStopping(patience=5, min_delta=0.005, mode='max') 
     experiment.set_model_graph(model)
     
+    param_grid = {
+        "batch_size":[2048],
+        "learning_rate":[0.001, 0.01, 0.1],
+       
+    }
+    param_grid = ParameterGrid(param_grid)
+    best_f1 = -float("inf")
+    best_params = None
+    best_model_weights_global = None
+    for params in param_grid:
     # --- 4. TRAINING LOOP ---
-    print("\n--- Inizio Training ---")
-    best_val_f1 = -1.0
+        print("\n--- Inizio Training --- con parametri:", params)
+        best_val_f1 = -1.0
 
-    for epoch in range(NUM_EPOCHS):
-        # Training
-        train_loss, train_acc = train_epoch_binary(model, train_dataloader, criterion, optimizer, scheduler, device, epoch, NUM_EPOCHS)
-        experiment.log_metric("train/loss", train_loss, step=epoch)
-        experiment.log_metric("train/accuracy", train_acc, step=epoch)
-        # Validation
-        val_loss, val_acc, val_f1 = eval_model_binary(model, dev_dataloader, criterion, device)
-        print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f}")
-        experiment.log_metric("val/loss", val_loss, step=epoch)
-        experiment.log_metric("val/accuracy", val_acc, step=epoch)
-        experiment.log_metric("val/f1", val_f1, step=epoch)
-        if val_f1 > best_val_f1:
-            best_val_f1 = val_f1
-            torch.save(model.state_dict(), MODEL_SAVE_PATH)
-            print(f"-> Nuovo miglior F1-score: {best_val_f1:.4f}. Modello salvato in '{MODEL_SAVE_PATH}'")
+            # Creazione dei DataLoader
+        train_dataloader = DataLoader(train_dataset, batch_size=params['batch_size'], shuffle=True, num_workers=NUM_WORKERS)
+        dev_dataloader = DataLoader(dev_dataset, batch_size=params['batch_size'], shuffle=False, num_workers=NUM_WORKERS)
 
-        if early_stopping(val_f1):
-            print(f"Early stopping attivato dopo {epoch+1} epoche.")
-            break       
+        optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=params['learning_rate'])
+
+
+        for epoch in range(NUM_EPOCHS):
+            # Training
+            train_loss, train_acc = train_epoch_binary(model, train_dataloader, criterion, optimizer, scheduler, device, epoch, NUM_EPOCHS)
+            experiment.log_metric("train/loss", train_loss, step=epoch)
+            experiment.log_metric("train/accuracy", train_acc, step=epoch)
+            # Validation
+            val_loss, val_acc, val_f1 = eval_model_binary(model, dev_dataloader, criterion, device)
+            print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f}")
+            experiment.log_metric("val/loss", val_loss, step=epoch)
+            experiment.log_metric("val/accuracy", val_acc, step=epoch)
+            experiment.log_metric("val/f1", val_f1, step=epoch)
+
+                    # Salvataggio miglior modello
+            if val_f1 > best_val_f1 + early_stopping.min_delta:
+                best_val_f1 = val_f1
+                best_model_weights = model.state_dict().copy()
+                print(f"Nuovo miglior F1: {best_val_f1:.4f}")
+
+            if early_stopping(val_f1):
+                print(f"Early stopping attivato dopo {epoch+1} epoche.")
+                break
+            # Aggiorna il miglior modello globale se il modello corrente è migliore
+        if best_val_f1 > best_f1:
+            best_f1 = best_val_f1
+            best_params = params
+            best_model_weights_global = best_model_weights  
+            print(f"Nuovo miglior F1 globale: {best_f1:.4f}")
 
     print("\n--- Training Completato ---")
+    print(f"\nParametri Migliori: {best_params}")
+    print(f"Miglior F1 Score: {best_f1:.4f}")
+    torch.save(best_model_weights_global, "best_model_weights_emotion.pt")
 
 if __name__ == '__main__':
     main()

@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from src.data import AudioDepressionDatasetSSL, collate_fn
+from sklearn.model_selection import ParameterGrid
 from src.models import DepressionClassifier
 from src.training import (
     train_epoch, 
@@ -90,29 +91,53 @@ def main():
     
     # Scheduler del learning rate
     scheduler = None
-
+    param_grid = {
+        "batch_size":[4,8],
+        "learning_rate":[1e-5, 3e-5, 5e-5] # Prova valori più piccoli per il learning rate
+    }
+    param_grid = ParameterGrid(param_grid)
+    best_f1 = -float("inf")
+    best_params = None
+    best_model_weights_global = None
     # --- 4. TRAINING LOOP ---
     print("\n--- Inizio Training ---")
     best_val_f1 = -1.0
+    for params in param_grid:
+        print("\n--- Inizio Training --- con parametri:", params)
+        best_val_f1 = -1.0
 
-    for epoch in range(NUM_EPOCHS):
-        # Training
-        train_loss, train_acc = train_epoch(model, train_dataloader, criterion, optimizer, scheduler, device, epoch, NUM_EPOCHS)
+        # Creazione dei DataLoader con i parametri correnti
+        train_dataloader = DataLoader(train_dataset, batch_size=params['batch_size'], shuffle=True, num_workers=NUM_WORKERS, collate_fn=collate_fn)
+        dev_dataloader = DataLoader(dev_dataset, batch_size=params['batch_size'], shuffle=False, num_workers=NUM_WORKERS, collate_fn=collate_fn)
 
-        # Validation
-        val_loss, val_acc, val_f1 = eval_model(model, dev_dataloader, criterion, device)
-        print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f}")
+        optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=params['learning_rate'])
+        for epoch in range(NUM_EPOCHS):
+            # Training
+            train_loss, train_acc = train_epoch(model, train_dataloader, criterion, optimizer, scheduler, device, epoch, NUM_EPOCHS)
 
-        if val_f1 > best_val_f1:
-            best_val_f1 = val_f1
-            torch.save(model.state_dict(), MODEL_SAVE_PATH)
-            print(f"-> Nuovo miglior F1-score: {best_val_f1:.4f}. Modello salvato in '{MODEL_SAVE_PATH}'")
+            # Validation
+            val_loss, val_acc, val_f1 = eval_model(model, dev_dataloader, criterion, device)
+            print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f}")
 
-        if early_stopping(val_f1):
-            print(f"Early stopping attivato dopo {epoch+1} epoche.")
-            break
-            
+            if val_f1 > best_val_f1 + early_stopping.min_delta:
+                best_val_f1 = val_f1
+                best_model_weights = model.state_dict().copy()
+                print(f"Nuovo miglior F1: {best_val_f1:.4f}")
+
+            if early_stopping(val_f1):
+                print(f"Early stopping attivato dopo {epoch+1} epoche.")
+                break
+            # Aggiorna il miglior modello globale se il modello corrente è migliore
+        if best_val_f1 > best_f1:
+            best_f1 = best_val_f1
+            best_params = params
+            best_model_weights_global = best_model_weights  
+            print(f"Nuovo miglior F1 globale: {best_f1:.4f}")
+
     print("\n--- Training Completato ---")
+    print(f"\nParametri Migliori: {best_params}")
+    print(f"Miglior F1 Score: {best_f1:.4f}")
+    torch.save(best_model_weights_global, "best_model_weights_emotion.pt")
 
     # --- 5. TEST FINALE SUL MIGLIOR MODELLO ---
     print("\n--- Inizio Test Finale ---")
