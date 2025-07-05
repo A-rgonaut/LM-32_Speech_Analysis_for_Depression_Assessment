@@ -45,37 +45,71 @@ def load_features_from_dataset(df, dataset_name, features_type):
     
     return np.array(X_list)
 
-def get_audio_paths(df, dataset_name):
+def get_audio_paths(df, dataset_dirs):
+    """
+    Per ogni partecipante nel df, raccoglie il percorso del file audio completo
+    cercando nelle directory specificate.
+    Restituisce un elenco di percorsi.
+    """
     audio_paths = []
+    
+    # 1. Crea una mappa di tutti i file audio disponibili per un accesso rapido
+    participant_file_map = {}
+    for dataset_dir in dataset_dirs:
+        if os.path.isdir(dataset_dir):
+            for dirname in os.listdir(dataset_dir): # es. '300_P'
+                # Estrae l'ID del partecipante dal nome della directory
+                participant_id_from_dir = dirname.replace('_P', '')
+                
+                # Costruisce il percorso del file audio completo
+                wav_filename = f"{participant_id_from_dir}_AUDIO.wav"
+                full_wav_path = os.path.join(dataset_dir, dirname, wav_filename)
+                
+                if os.path.isfile(full_wav_path):
+                    participant_file_map[participant_id_from_dir] = full_wav_path
+
+    # 2. Itera sul DataFrame per trovare i percorsi corrispondenti
     for participant_id in df['Participant_ID']:
-        dir_name = f"{participant_id}_P"
-        wav_path = os.path.join(dataset_name, dir_name, f"{participant_id}_AUDIO.wav")
-        if os.path.isfile(wav_path):
-            audio_paths.append(wav_path)
-        else:
-            print(f"Warning: File non trovato per {participant_id} in {wav_path}")
+        participant_id_str = str(participant_id)
+        
+        if participant_id_str in participant_file_map:
+            audio_paths.append(participant_file_map[participant_id_str])
             
     return audio_paths
 
-def get_split_audio_paths(df, dataset_name):
+def get_split_audio_paths(df, dataset_dirs):
     """
-    For each participant in df, collect all 10s audio segment paths in their directory.
-    Returns a list of paths and a list of corresponding labels.
+    Per ogni partecipante nel df, raccoglie tutti i percorsi dei segmenti audio
+    cercando nelle directory specificate.
+    Restituisce un elenco di percorsi e un elenco di etichette corrispondenti.
     """
     audio_paths = []
     labels = []
-    for idx, row in df.iterrows():
-        participant_id = int(row['Participant_ID'])  # Ensure integer for directory name
-        label = int(row['PHQ8_Binary']) if 'PHQ8_Binary' in row else int(row['PHQ_Binary'])
-        dir_name = f"{participant_id}_P"
-        part_dir = os.path.join(dataset_name, dir_name)
-        if os.path.isdir(part_dir):
+    
+    # 1. Crea una mappa di tutte le directory dei partecipanti per un accesso rapido
+    participant_dirs_map = {}
+    for dataset_dir in dataset_dirs:
+        if os.path.isdir(dataset_dir):
+            for dirname in os.listdir(dataset_dir): # es. '300_P'
+                # Mappa l'ID del partecipante (es. '300' o '300_tone') al suo percorso completo
+                participant_id_from_dir = dirname.replace('_P', '')
+                participant_dirs_map[participant_id_from_dir] = os.path.join(dataset_dir, dirname)
+
+    # 2. Itera sul DataFrame per trovare i segmenti audio corrispondenti
+    for _, row in df.iterrows():
+        participant_id = str(row['Participant_ID'])
+        label_col = 'PHQ8_Binary' if 'PHQ8_Binary' in row else 'PHQ_Binary'
+        label = int(row[label_col])
+        
+        part_dir = participant_dirs_map.get(participant_id)
+        
+        if part_dir and os.path.isdir(part_dir):
             for fname in os.listdir(part_dir):
                 if fname.endswith('.wav') and '_part' in fname:
                     audio_paths.append(os.path.join(part_dir, fname))
                     labels.append(label)
         else:
-            print(f"Warning: Directory not found for {participant_id} in {part_dir}")
+            print(f"Attenzione: Directory non trovata per il partecipante {participant_id} in nessuna delle cartelle specificate.")
 
     return audio_paths, labels
 
