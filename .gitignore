@@ -1,7 +1,4 @@
 datasets
-andrea_src
-classes
-features
 .DS_Store
 __pycache__
 .env
