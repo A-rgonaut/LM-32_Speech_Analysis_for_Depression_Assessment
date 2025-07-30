@@ -1,9 +1,9 @@
 import numpy as np
 
-from andrea_src.src_utils import clear_cache
-from andrea_src.svm_module.config import SVMConfig
-from andrea_src.svm_module.data_loader import DataLoader
-from andrea_src.svm_module.model import SVMModel
+from src.src_utils import clear_cache
+from src.svm_module.config import SVMConfig
+from src.svm_module.data_loader import DataLoader
+from src.svm_module.model import SVMModel
 
 clear_cache()
 

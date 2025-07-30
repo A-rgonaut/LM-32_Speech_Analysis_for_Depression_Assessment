@@ -1,20 +1,29 @@
 import gc
 import torch
 import numpy as np
+import pandas as pd
+from typing import Tuple, List
 from sklearn.metrics import confusion_matrix, accuracy_score, roc_auc_score, classification_report
 
 def clear_cache():
-
     gc.collect()
     torch.cuda.empty_cache()
-    np.random.seed(42)  # Per riproducibilità
+    np.random.seed(42) 
     torch.manual_seed(42)
     
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(42)
 
+def filter_edaic_samples(splits: Tuple[pd.DataFrame, ...]) -> List[pd.DataFrame]:
+    """Filters out augmented E-DAIC samples (ID >= 600) from a tuple of dataframes."""
+    filtered_splits = []
+    for split_df in splits:
+        filtered_split = split_df[split_df['Participant_ID'] < 600].copy()
+        if not filtered_split.empty:
+            filtered_splits.append(filtered_split)
+    return filtered_splits
+
 def get_splits(splits : tuple):
-    
     train_split, test_split, dev_split = splits
 
     train_paths = [f'datasets/E1-DAIC-WOZ/{row["Participant_ID"]}_P/{row["Participant_ID"]}_AUDIO.wav' 
@@ -52,3 +61,27 @@ def get_metrics(y_true, y_pred, *args : str):
         return metrics
     else:
         return {metric: metrics[metric] for metric in args if metric in metrics}
+    
+class EarlyStopping:
+    def __init__(self, patience=3, min_delta=0.0, mode='max'):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self.counter = 0
+        self.best_score = -np.inf if mode == 'max' else np.inf
+
+    def __call__(self, current_score):
+        if self.mode == 'max':
+            improvement = (current_score - self.best_score) > self.min_delta
+        else:
+            improvement = (self.best_score - current_score) > self.min_delta
+
+        if improvement:
+            self.best_score = current_score
+            self.counter = 0
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True  # Early stop
+            
+        return False

@@ -2,11 +2,11 @@ import os
 from dotenv import load_dotenv
 from comet_ml import Experiment
 
-from andrea_src.src_utils import clear_cache
-from andrea_src.cnn_module.config import CNNConfig
-from andrea_src.cnn_module.data_loader import DataLoader
-from andrea_src.cnn_module.model import CNNModel
-from andrea_src.cnn_module.trainer import Trainer
+from src.src_utils import clear_cache
+from src.cnn_module.config import CNNConfig
+from src.cnn_module.data_loader import DataLoader
+from src.cnn_module.model import CNNModel
+from src.cnn_module.trainer import Trainer
 
 clear_cache()
 load_dotenv()

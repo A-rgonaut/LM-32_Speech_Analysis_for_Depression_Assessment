@@ -1,17 +1,12 @@
-import os
-import sys
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 from sklearn.model_selection import ParameterGrid
-from torch.optim.lr_scheduler import StepLR
 
-from .utils  import EarlyStopping
 from .config import CNNConfig
 from .data_loader import DataLoader
 from .model import CNNModel
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import src_utils
+from ..src_utils  import EarlyStopping, get_metrics
 
 class Trainer():
     def __init__(self, model : CNNModel, train_loader : DataLoader, val_loader: DataLoader, config: CNNConfig):
@@ -20,9 +15,7 @@ class Trainer():
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.optimizer = torch.optim.Adam(model.parameters(), lr = config.learning_rate)
-        lambda_decay = 3
-        decay_factor = 0.9
-        self.scheduler = StepLR(self.optimizer, step_size=lambda_decay, gamma=decay_factor)
+        self.scheduler = None
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.criterion = nn.BCEWithLogitsLoss()
         self.model.to(self.device)
@@ -73,7 +66,7 @@ class Trainer():
         
         avg_loss = total_loss / len(self.val_loader)
         accuracy = correct_predictions.double() / len(self.val_loader.dataset)
-        metrics = src_utils.get_metrics(targets, predictions, 'f1_macro', 'f1_depression')
+        metrics = get_metrics(targets, predictions, 'f1_macro', 'f1_depression')
 
         return avg_loss, accuracy, metrics['f1_macro'], metrics['f1_depression']
 
@@ -84,9 +77,7 @@ class Trainer():
             mode = self.config.early_stopping_mode
         )
 
-        best_model_weights = None
-        best_epoch = -1
-        best_val_f1 = -float('inf')
+        best_model_weights, best_epoch, best_val_f1 = None, -1, -float('inf')
         experiment.set_model_graph(self.model)
 
         for epoch in range(self.config.epochs): 
@@ -103,15 +94,15 @@ class Trainer():
             print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | " + \
                   f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | Val F1 Macro: {val_f1_macro:.4f} | Val F1 Depression: {val_f1_depression:.4f}")
 
-            if early_stopping(val_f1_macro):
-                print(f"Early stopping activated after {epoch+1} epochs.")
-                break
-
             if val_f1_macro > best_val_f1:
                 best_val_f1 = val_f1_macro
                 best_epoch = epoch
                 best_model_weights = self.model.state_dict().copy()
                 print(f"New best F1: {best_val_f1:.4f} (model saved)")
+
+            if early_stopping(val_f1_macro):
+                print(f"Early stopping activated after {epoch+1} epochs.")
+                break
 
         if best_model_weights is None:
             best_model_weights = self.model.state_dict().copy()

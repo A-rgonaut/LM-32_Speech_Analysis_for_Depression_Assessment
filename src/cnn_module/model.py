@@ -70,8 +70,8 @@ class CNNModel(nn.Module):
         x = self.conv_block2(x)
         x = self.conv_block3(x)
 
-        x = self.glob_avg_pool(x)               # [B, 64, 1]
-        x_flattened = self.flatten(x)           # [B, 64]
-        output = self.mlp_block(x_flattened)    # [B, 1] con Sigmoid già applicato
+        x = self.glob_avg_pool(x)               
+        x_flattened = self.flatten(x)           
+        output = self.mlp_block(x_flattened)    
 
         return output

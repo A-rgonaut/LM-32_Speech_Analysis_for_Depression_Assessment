@@ -1,14 +1,12 @@
 import os
-import sys
 import numpy as np
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
 
 from .utils import process_interview
 from .config import SVMConfig
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from preprocessor import E1_DAIC
-
+from ..preprocessor import E1_DAIC
+from  ..src_utils import filter_edaic_samples
 
 class DataLoader:
     def __init__(self, config: SVMConfig):
@@ -16,17 +14,7 @@ class DataLoader:
         self.preprocessor = E1_DAIC(config.daic_path, config.e_daic_path, config.e1_daic_path)
         self.splits = self.preprocessor.get_dataset_splits()
         if not self.config.edaic_aug:
-            self.splits = self._filter_edaic_samples()
-
-    def _filter_edaic_samples(self):
-        filtered_splits = []
-        
-        for split in self.splits:
-            filtered_split = split[split['Participant_ID'] < 600].copy()
-            if len(filtered_split) > 0:
-                filtered_splits.append(filtered_split)
-        
-        return filtered_splits
+            self.splits = filter_edaic_samples(self.splits) 
 
     def __make_data(self):
         interviews_to_process = []

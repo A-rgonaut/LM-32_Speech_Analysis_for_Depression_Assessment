@@ -22,7 +22,7 @@ class E1_DAIC():
         Initializes the E1_DAIC class with dataset paths.
     __make_dataset() -> pd.DataFrame:
         Creates and processes the dataset by loading, merging, and cleaning data from CSV files.
-    _create_splits(df: pd.DataFrame) -> pd.DataFrame:
+    __create_splits(df: pd.DataFrame) -> pd.DataFrame:
         Splits the dataframe into training, testing, and development sets based on original DAIC-WOZ splits.
     __preprocess() -> pd.DataFrame:
         Preprocesses the E1-DAIC-WOZ dataset by processing audio and transcription files, removing overlapping segments, and saving the results.
@@ -75,7 +75,7 @@ class E1_DAIC():
         return file
     
     # Splitting the dataset into train, test, and dev sets
-    def _create_splits(self, df: pd.DataFrame) -> pd.DataFrame:
+    def __create_splits(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Splits the dataframe into training, testing, and development sets.
 
@@ -207,7 +207,7 @@ class E1_DAIC():
                 return
 
         # Create and save splits
-        df = self._create_splits(df)
+        df = self.__create_splits(df)
         df.to_csv(self.e1_daic_path + 'e1_daic_dataset.csv', index=False)
 
         return df

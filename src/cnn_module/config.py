@@ -1,18 +1,21 @@
 class CNNConfig:
     def __init__(self):
         self.edaic_aug = True
-        self.dropout_rate = 0.2
-        # dataset
+        self.balance_segments = True
+        
         self.sample_rate = 16000
-        self.segment_samples = 64_000 # 4 * self.sample_rate 
-        # train
+        self.segment_samples = 64_000 
+        self.hop_samples = 64_000 
+
+        self.dropout_rate = 0.2
+
         self.epochs = 50
         self.batch_size = 32
         self.learning_rate = 0.001
         self.early_stopping_patience = 5
         self.early_stopping_min_delta = 0.01
         self.early_stopping_mode = 'max'
-        # grid_param
+        
         self.grid_params = {
             'batch_size' : [16, 32, 64],
             'learning_rate' : [0.001, 0.0005],

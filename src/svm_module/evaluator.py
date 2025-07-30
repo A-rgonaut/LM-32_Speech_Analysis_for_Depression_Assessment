@@ -1,10 +1,8 @@
 import os
-import sys
 import pandas as pd
 from sklearn.metrics import confusion_matrix, classification_report
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from src_utils import get_metrics
+from ..src_utils import get_metrics
 
 class Evaluator:
     def __init__(self, model, test_X, test_y):

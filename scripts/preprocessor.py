@@ -1,4 +1,4 @@
-from andrea_src.preprocessor import E1_DAIC
+from src.preprocessor import E1_DAIC
 
 def main():
     e1_daic = E1_DAIC('datasets/DAIC-WOZ/', 'datasets/E-DAIC-WOZ/', 'datasets/E1-DAIC-WOZ/')

@@ -1,9 +1,9 @@
 import joblib
 import numpy as np
 
-from andrea_src.svm_module.config import SVMConfig
-from andrea_src.svm_module.data_loader import DataLoader
-from andrea_src.svm_module.evaluator import Evaluator
+from src.svm_module.config import SVMConfig
+from src.svm_module.data_loader import DataLoader
+from src.svm_module.evaluator import Evaluator
 
 model_names = [
     'svm_model_articulation.pkl',
