@@ -57,14 +57,16 @@ class Dataset(TorchDataset):
         interview = self.interviews[idx]
         audio, sr = torchaudio.load(interview['audio_path'])
         utterance_tensors = []
+        target_len = int(self.config.max_utt_seconds * sr)
         for start, end in interview['utterances']:
             start_sample = int(start * sr)
             end_sample = int(end * sr)
             utt = audio[:, start_sample:end_sample]
             utt_len = end_sample - start_sample
-            pad_len = int(self.config.max_utt_seconds * sr) - utt_len
-            if pad_len > 0:
-                utt = torch.nn.functional.pad(utt, (0, pad_len))
+            if utt_len < target_len:
+                utt = torch.nn.functional.pad(utt, (0, target_len - utt_len))
+            elif utt_len > target_len:
+                utt = utt[:, :target_len]
             utterance_tensors.append(utt)
         utterances_tensor = torch.stack(utterance_tensors)  # (T, C, L)
         item = {
