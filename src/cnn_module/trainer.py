@@ -45,10 +45,11 @@ class Trainer():
 
     def validate_epoch(self):
         self.model.eval()
-        
-        total_loss, correct_predictions = 0, 0
-        predictions, targets = [], []
 
+        total_loss = 0
+        #'''
+        predictions, targets = [], []
+    
         with torch.no_grad():
             for batch in tqdm(self.val_loader):
                 inputs = batch['input_values'].to(self.device)  
@@ -59,16 +60,64 @@ class Trainer():
                 total_loss += loss.item()
 
                 preds = (torch.sigmoid(outputs.squeeze(1)) > 0.5).float()
-                correct_predictions += torch.sum(preds == label)
 
                 predictions.extend(preds.cpu().numpy())
                 targets.extend(label.cpu().numpy())
         
         avg_loss = total_loss / len(self.val_loader)
-        accuracy = correct_predictions.double() / len(self.val_loader.dataset)
-        metrics = get_metrics(targets, predictions, 'f1_macro', 'f1_depression')
+        metrics = get_metrics(targets, predictions, 'f1_macro', 'f1_depression', 'accuracy')
+        '''
+        session_preds = {}
+        session_targets = {}
 
-        return avg_loss, accuracy, metrics['f1_macro'], metrics['f1_depression']
+        with torch.no_grad():
+            for batch in tqdm(self.val_loader):
+                inputs = batch['input_values'].to(self.device)  
+                labels = batch['label'].to(self.device)
+                audio_ids = batch['audio_id']
+                
+                outputs = self.model(inputs)                
+                loss = self.criterion(outputs.squeeze(1), labels)
+                total_loss += loss.item()
+
+                # Ottieni le predizioni per i segmenti nel batch
+                preds = (torch.sigmoid(outputs.squeeze(1)) > 0.5).float()
+
+                # Raggruppa le predizioni per audio_id
+                for i in range(len(audio_ids)):
+                    session_id = audio_ids[i].item()
+                    pred = preds[i].item()
+                    target = labels[i].item()
+                    
+                    if session_id not in session_preds:
+                        session_preds[session_id] = []
+                    
+                    session_preds[session_id].append(pred)
+                    # Il target è lo stesso per tutti i segmenti di una sessione
+                    session_targets[session_id] = target
+
+        # Aggrega le predizioni a livello di sessione (majority vote)
+        final_predictions = []
+        final_targets = []
+        
+        for session_id in session_preds:
+            if self.eval_strategy == 'average':
+                avg_score = np.mean(session_preds[session_id])
+                predicted_label = 1 if avg_score > 0.5 else 0
+            elif self.eval_strategy == 'majority':
+                segment_predictions = [1 if score > 0.5 else 0 for score in session_preds[session_id]]
+                predicted_label = max(set(segment_predictions), key=segment_predictions.count)
+            
+            final_predictions.append(predicted_label)
+            final_targets.append(session_targets[session_id])
+
+        avg_loss = total_loss / len(self.val_loader)
+        
+        # Calcola le metriche sulle predizioni a livello di sessione
+        metrics = get_metrics(final_targets, final_predictions, 'f1_macro', 'f1_depression', 'accuracy')
+        #'''   
+
+        return avg_loss, metrics['accuracy'], metrics['f1_macro'], metrics['f1_depression']
 
     def train(self, experiment):
         early_stopping = EarlyStopping(
@@ -111,6 +160,7 @@ class Trainer():
 
         return early_stopping.best_score, best_epoch
 
+    # TODO da sistemare, non funziona
     def train_grid(self, experiment):
         results = []
         grid_params = ParameterGrid(self.config.grid_params)

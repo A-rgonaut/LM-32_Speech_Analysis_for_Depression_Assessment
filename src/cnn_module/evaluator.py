@@ -1,66 +1,62 @@
 import os
-import sys
 import pandas as pd
 import torch
 import numpy as np
 from tqdm.auto import tqdm
-from collections import defaultdict
 from sklearn.metrics import confusion_matrix, classification_report
 
 from ..src_utils import get_metrics
 
 class Evaluator:
-    def __init__(self, model, test_loader, stategy='average'):
+    def __init__(self, model, test_loader, eval_strategy='average'):
         self.test_loader = test_loader
         self.results_file = 'results/cnn_evaluation_results.csv'
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = model.to(self.device)
-        self.strategy = stategy
+        self.eval_strategy = eval_strategy
 
-    def evaluate(self): # Dizionario per raccogliere le probabilità per ogni file
-        # defaultdict(list) crea una lista vuota per ogni nuova chiave
-        file_scores = defaultdict(list)
-        file_labels = {} # Dizionario per memorizzare l'etichetta di ogni file
-
+    def evaluate(self): 
+        session_preds = {}
+        session_targets = {}
+        self.model.eval()
         with torch.no_grad():
             for batch in tqdm(self.test_loader):
                 inputs = batch['input_values'].to(self.device)
-                batch['label'] = batch['label'].to(self.device)
-                filenames = batch['audio_id']    
+                labels = batch['label'].to(self.device)
+                audio_ids = batch['audio_id']    
 
                 outputs = self.model(inputs)
-                probabilities = torch.sigmoid(outputs)
+                preds = torch.sigmoid(outputs)
 
-                for i in range(len(filenames)):
-                    filename = filenames[i].item()
-                    score = probabilities[i].item()
-                    label = batch['label'][i].item()
+                for i in range(len(audio_ids)):
+                    session_id = audio_ids[i].item()
+                    pred = preds[i].item()
+                    target = labels[i].item()
+
+                    if session_id not in session_preds:
+                        session_preds[session_id] = []
                     
-                    file_scores[filename].append(score)
-                    
-                    # Memorizziamo l'etichetta del file (sarà la stessa per tutti i suoi segmenti)
-                    if filename not in file_labels:
-                        file_labels[filename] = int(label)
+                    session_preds[session_id].append(pred)
+                    session_targets[session_id] = target
 
             final_predictions = []
-            true_labels = []
+            final_targets = []
 
-            # Iteriamo sui file in ordine alfabetico per assicurarci che l'ordine sia consistente)
-            for filename in sorted(file_scores.keys()):
-                if self.strategy == 'average':
-                    avg_score = np.mean(file_scores[filename])
+            for session_id in session_preds:
+                if self.eval_strategy == 'average':
+                    avg_score = np.mean(session_preds[session_id])
                     predicted_label = 1 if avg_score > 0.5 else 0
-                elif self.strategy == 'majority':
-                    segment_predictions = [1 if score > 0.5 else 0 for score in file_scores[filename]]
+                elif self.eval_strategy == 'majority':
+                    segment_predictions = [1 if score > 0.5 else 0 for score in session_preds[session_id]]
                     predicted_label = max(set(segment_predictions), key=segment_predictions.count)
                 
                 final_predictions.append(predicted_label)
-                true_labels.append(file_labels[filename])
-        
-        metrics = get_metrics(true_labels, final_predictions)
+                final_targets.append(session_targets[session_id])
 
-        print(confusion_matrix(true_labels, final_predictions))
-        print(classification_report(true_labels, final_predictions, target_names=['No Depression', 'Depression']))
+        metrics = get_metrics(final_targets, final_predictions)
+
+        print(confusion_matrix(final_targets, final_predictions))
+        print(classification_report(final_targets, final_predictions, target_names=['No Depression', 'Depression']))
         print(f"Sensitivity: {metrics['sensitivity']:.4f}")
         print(f"Specificity: {metrics['specificity']:.4f}")
 

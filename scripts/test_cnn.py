@@ -11,5 +11,5 @@ _, test_loader, _ = data_loader.load_data()
 
 model = CNNModel(config)
 model.load_state_dict(torch.load(config.model_save_path))
-evaluator = Evaluator(model, test_loader, 'average')
+evaluator = Evaluator(model, test_loader, config.eval_strategy)
 evaluator.evaluate()
