@@ -2,10 +2,10 @@ import os
 from dotenv import load_dotenv
 from comet_ml import Experiment
 
-from src.cnn_module.config import CNNConfig
-from src.cnn_module.data_loader import DataLoader
-from src.cnn_module.model import CNNModel
-from src.cnn_module.trainer import Trainer
+from src.ssl_module.config import SSLConfig
+from src.ssl_module.data_loader import DataLoader
+from src.ssl_module.model import SSLModel
+from src.ssl_module.trainer import Trainer
 
 def main():
     load_dotenv()
@@ -16,11 +16,11 @@ def main():
         workspace = os.getenv("COMET_WORKSPACE")
     )
 
-    config = CNNConfig()
+    config = SSLConfig()
     data_loader = DataLoader(config)
     train_loader, _, dev_loader = data_loader.load_data()
 
-    model = CNNModel(config)
+    model = SSLModel(config)
 
     trainer = Trainer(model, train_loader, dev_loader, config)
     trainer.train(experiment)

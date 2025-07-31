@@ -31,9 +31,6 @@ class E1_DAIC():
     get_dataset_splits() -> tuple:
         Loads or creates the E1-DAIC-WOZ dataset and returns the training, testing, and development splits as DataFrames.
     """
-
-    SEED = 42
-
     def __init__(self, daic_path : str = 'datasets/DAIC-WOZ/', e_daic_path : str = 'datasets/E-DAIC-WOZ/', e1_daic_path : str = 'datasets/E1-DAIC-WOZ/'):
         self.daic_path = daic_path
         self.e_daic_path = e_daic_path
@@ -159,6 +156,10 @@ class E1_DAIC():
                 # Rename Text to value if it exists
                 if 'Text' in transcription_df.columns:
                     transcription_df = transcription_df.rename(columns={'Text': 'value'})
+                
+                # Remove utterances that contains <synch>, <sync> and scrubbed_entry
+                if 'value' in transcription_df.columns:
+                    transcription_df = transcription_df[~transcription_df['value'].str.contains(r'<synch>|<sync>|scrubbed_entry', case=False, na=False)]
 
                 # Clean up overlapping segments
                 transcription_df['Prev_End_Time'] = transcription_df['End_Time'].shift(1)
@@ -263,3 +264,54 @@ class E1_DAIC():
         dev_df = df[df['Split'] == 'dev']
 
         return train_df, test_df, dev_df
+    
+    def print_audio_duration_stats(self, split):
+        daic_durations = {0: 0.0, 1: 0.0}
+        edaic_durations = {0: 0.0, 1: 0.0}
+        daic_utterance_durations = []
+        edaic_utterance_durations = []
+
+        for _, row in split.iterrows():
+            participant_id = row['Participant_ID']
+            phq_bin = row['PHQ_Binary']
+            audio_path = f"{self.e1_daic_path}{participant_id}_P/{participant_id}_AUDIO.wav"
+            transcript_path = f"{self.e1_daic_path}{participant_id}_P/{participant_id}_Transcript.csv"
+
+            info = sf.info(audio_path)
+            duration = info.frames / info.samplerate / 60  
+            df_trans = pd.read_csv(transcript_path)
+            utt_durs = df_trans['End_Time'] - df_trans['Start_Time']
+            if participant_id >= 600:
+                edaic_durations[phq_bin] += duration
+                edaic_utterance_durations.extend(utt_durs.tolist())
+            else:
+                daic_durations[phq_bin] += duration
+                daic_utterance_durations.extend(utt_durs.tolist())
+
+        print("\nAudio duration statistics (in minutes):")
+        print(f"  Class 0: {daic_durations[0]:.2f} min")
+        print(f"  Class 1: {daic_durations[1]:.2f} min (E-DAIC: {edaic_durations[1]:.2f} min)")
+        print(f"  Total:   {daic_durations[0] + daic_durations[1]:.2f} min " + \
+              f"(with E-DAIC: {daic_durations[0] + daic_durations[1] + edaic_durations[1]:.2f} min)")
+        
+        if daic_utterance_durations:
+            avg_utt = np.mean(daic_utterance_durations)
+            min_utt = np.min(daic_utterance_durations)
+            max_utt = np.max(daic_utterance_durations)
+            over_10s = np.sum(np.array(daic_utterance_durations) > 10)
+            print("\nUtterance statistics DAIC (seconds):")
+            print(f"  Average duration: {avg_utt:.2f} s")
+            print(f"  Shortest utterance: {min_utt:.2f} s")
+            print(f"  Longest utterance: {max_utt:.2f} s")
+            print(f"  Utterances > 10s: {over_10s} ({over_10s/len(daic_utterance_durations)*100:.2f}%)")
+
+        if edaic_utterance_durations:
+            avg_utt = np.mean(edaic_utterance_durations)
+            min_utt = np.min(edaic_utterance_durations)
+            max_utt = np.max(edaic_utterance_durations)
+            over_10s = np.sum(np.array(edaic_utterance_durations) > 10)
+            print("\nUtterance statistics E-DAIC (seconds):")
+            print(f"  Average duration: {avg_utt:.2f} s")
+            print(f"  Shortest utterance: {min_utt:.2f} s")
+            print(f"  Longest utterance: {max_utt:.2f} s")
+            print(f"  Utterances > 10s: {over_10s} ({over_10s/len(edaic_utterance_durations)*100:.2f}%)")

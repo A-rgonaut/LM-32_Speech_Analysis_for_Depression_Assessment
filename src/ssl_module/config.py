@@ -1,24 +1,37 @@
-
 class SSLConfig:
-
     def __init__(self):
-        self.dropout_rate = 0.5
-        #dataset
+        self.model_name = 'facebook/wav2vec2-base-960h'
+        self.edaic_aug = False
+        self.balance_segments = False
+        self.eval_strategy = 'majority'
+        
         self.sample_rate = 16000
-        self.hop_ms = 20000
-        self.segment_ms = 20000
-        #train
+        self.segment_samples = 64_000 
+        self.hop_samples = 64_000 
+        self.max_utt_seconds = 10.0
+        self.min_utt_seconds = 1.0
+        self.utt_overlap = 0.5
+
+        self.dropout_rate = 0.2
+        self.transformer_d_model = 128
+        self.transformer_nhead = 4
+        self.transformer_num_layers = 2
+
         self.epochs = 50
-        self.batch_size = 512
+        self.batch_size = 32
         self.learning_rate = 0.001
         self.early_stopping_patience = 5
         self.early_stopping_min_delta = 0.01
-        self.early_stopping_mode = max
-        #grid_param
-        self.grid_batch_size = [16, 32, 64]
-        self.grid_learning_rate = [0.001, 0.0005]
-        self.grid_segment_ms = [250, 500]
+        self.early_stopping_mode = 'max'
+        
+        self.grid_params = {
+            'batch_size' : [16, 32, 64],
+            'learning_rate' : [0.001, 0.0005],
+            'segment_ms' : [250, 500],
+            'spectrogram_window_frames' : [100, 120, 140]
+        }
 
-        self.model_save_path = "saved_model/ssl_model.h5"
-        self.e_daic_path = '../datasets/E-DAIC-WOZ/'
-        self.e1_daic_path = '../datasets/E1-DAIC-WOZ/'
+        self.model_save_path = "saved_models/ssl_model.pth"
+        self.daic_path = 'datasets/DAIC-WOZ/'
+        self.e_daic_path = 'datasets/E-DAIC-WOZ/'
+        self.e1_daic_path = 'datasets/E1-DAIC-WOZ/'

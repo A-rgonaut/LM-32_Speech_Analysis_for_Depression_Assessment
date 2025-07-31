@@ -35,10 +35,7 @@ class Dataset(TorchDataset):
         for i, path in enumerate(audio_paths):
             label = labels[i]
             info = torchaudio.info(path)
-            if self.random_crop_to_shortest:
-                num_frames_to_segment = self.crop_len_samples
-            else:
-                num_frames_to_segment = info.num_frames
+            num_frames_to_segment = info.num_frames
 
             duration = num_frames_to_segment / info.sample_rate
             total_durations[label] += duration

@@ -1,100 +1,123 @@
-
 import os
-import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import torch
-import src_utils
 import torchaudio
-import numpy as np
-from config import SSLConfig
-from preprocessor import E1_DAIC
+import pandas as pd
 from torch.utils.data import Dataset as TorchDataset, DataLoader as TorchDataLoader
 
-class Dataset(TorchDataset):
+from .config import SSLConfig
+from ..src_utils import get_splits, filter_edaic_samples
+from ..preprocessor import E1_DAIC
 
-    def __init__(self, audio_paths : str, labels : str, return_audio_id : bool = True, config : SSLConfig = SSLConfig()):
+class Dataset(TorchDataset):
+    def __init__(self, audio_paths, labels, config=SSLConfig(), balance_segments=False):
         self.config = config
         self.audio_paths = audio_paths
         self.labels = labels
         self.sample_rate = config.sample_rate
-        self.segment_indices = []
-        self.segment_ms = config.segment_ms
-        self.segment_samples = int(config.sample_rate * (config.segment_ms / 1000.0))
-        self.hop_ms = config.hop_ms
-        self.hop_samples = int(config.sample_rate * (config.hop_ms / 1000.0))
-        self.return_audio_id = return_audio_id
+        self.max_utt_seconds = config.max_utt_seconds
+        self.min_utt_seconds = config.min_utt_seconds
+        self.utt_overlap = config.utt_overlap
 
-        # Precompute segment indices for each audio file
-        for id, audio_path in enumerate(self.audio_paths):
-            num_frames = torchaudio.info(audio_path).num_frames
-            starts = np.arange(0, num_frames - self.segment_samples + 1, self.hop_samples)
-            self.segment_indices.extend([(id, int(start)) for start in starts])
+        self.interviews = self.__precompute_interviews()
+
+    def __precompute_interviews(self):
+        interviews = []
+        for idx, audio_path in enumerate(self.audio_paths):
+            transcript_path = audio_path.replace('_AUDIO.wav', '_Transcript.csv')
+            df = pd.read_csv(transcript_path)
+            utterances = []
+            for _, row in df.iterrows():
+                start = float(row['Start_Time'])
+                end = float(row['End_Time'])
+                duration = end - start
+                if duration < self.config.min_utt_seconds:
+                    continue  # Remove short utterances
+                elif duration <= self.config.max_utt_seconds:
+                    utterances.append((start, end))
+                else:
+                    # Split long utterance into segments of max max_utt_seconds with overlap
+                    seg_start = start
+                    while seg_start < end:
+                        seg_end = min(seg_start + self.config.max_utt_seconds, end)
+                        if seg_end - seg_start >= self.config.min_utt_seconds:
+                            utterances.append((seg_start, seg_end))
+                        seg_start += self.config.max_utt_seconds - self.config.utt_overlap
+            if utterances:
+                interviews.append({
+                    'audio_path': audio_path,
+                    'utterances': utterances,
+                    'label': self.labels[idx]
+                })
+        return interviews
 
     def __len__(self):
-        return len(self.segment_indices)
+        return len(self.interviews)
 
     def __getitem__(self, idx):
-
-        id, start_sample = self.segment_indices[idx]
-        file_path = self.audio_paths[id]
-        label = self.labels[id]
-
-        waveform_segment, _ = torchaudio.load(file_path,
-                                              frame_offset = start_sample,
-                                              num_frames = self.segment_samples)
-        
-        item = {'input_values': waveform_segment, 
-                'label': torch.tensor([label], dtype = torch.float32)}
-        
-        if self.return_audio_id:
-            item['audio_id'] = id
-
+        interview = self.interviews[idx]
+        audio, sr = torchaudio.load(interview['audio_path'])
+        utterance_tensors = []
+        for start, end in interview['utterances']:
+            start_sample = int(start * sr)
+            end_sample = int(end * sr)
+            utt = audio[:, start_sample:end_sample]
+            utt_len = end_sample - start_sample
+            pad_len = int(self.config.max_utt_seconds * sr) - utt_len
+            if pad_len > 0:
+                utt = torch.nn.functional.pad(utt, (0, pad_len))
+            utterance_tensors.append(utt)
+        utterances_tensor = torch.stack(utterance_tensors)  # (T, C, L)
+        item = {
+            'utterances': utterances_tensor,  # shape: (T, C, L)
+            'label': torch.tensor(interview['label'], dtype=torch.float32)
+        }
         return item
 
 class DataLoader():
-    
     def __init__(self, config : SSLConfig = SSLConfig()):
         self.config = config
         self.batch_size = config.batch_size
-        self.preprocessor = E1_DAIC(config.e_daic_path, config.e1_daic_path)
-        self.splits = self.preprocessor.split_dataset()
+        self.balance_segments = config.balance_segments
+        self.preprocessor = E1_DAIC(config.daic_path, config.e_daic_path, config.e1_daic_path)
+        self.splits = self.preprocessor.get_dataset_splits()
+        if not self.config.edaic_aug:
+            self.splits = filter_edaic_samples(self.splits)
 
     def __get_generators(self):
-
-        train_paths, train_labels, test_paths, test_labels, dev_paths, dev_labels = src_utils.get_splits(self.splits)
+        train_paths, train_labels, test_paths, test_labels, dev_paths, dev_labels = get_splits(self.splits)
 
         train_dataset = Dataset(
             audio_paths = train_paths,
             labels = train_labels,
-            return_audio_id = True,
+            balance_segments = self.balance_segments,
             config = self.config
         )
         
         test_dataset = Dataset(
             audio_paths = test_paths,
             labels = test_labels,
-            return_audio_id = True,
             config = self.config
         )
         
         dev_dataset = Dataset(
             audio_paths = dev_paths,
             labels = dev_labels,
-            return_audio_id = True,
             config = self.config
         )
 
         return train_dataset, test_dataset, dev_dataset
 
     def load_data(self):
-        
         train_dataset, test_dataset, dev_dataset = self.__get_generators()
 
         train_loader = TorchDataLoader(
             train_dataset, 
-            batch_size = self.batch_size, 
-            num_workers = os.cpu_count())
-        
+            batch_size = self.batch_size,
+            shuffle=True,
+            num_workers=os.cpu_count(),
+            pin_memory=True
+        )
+            
         test_loader = TorchDataLoader(
             test_dataset, 
             batch_size = self.batch_size, 
