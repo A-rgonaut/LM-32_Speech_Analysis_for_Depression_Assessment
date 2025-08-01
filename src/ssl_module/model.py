@@ -1,117 +1,158 @@
 import torch
-import torch.nn as nn
-from transformers import Wav2Vec2Model
-from typing import List
+from torch import nn
+from transformers import AutoModel
 
 from .config import SSLConfig
 
+class AttentionPoolingLayer(nn.Module):
+    
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.linear = nn.Linear(embed_dim, 1)
+        
+    def forward(self, x, mask=None):
+        """
+        Forward pass.
+        Args:
+            x: The input tensor of shape (batch_size, seq_len, embed_dim).
+            mask: The padding mask of shape (batch_size, seq_len).
+        Returns:
+            The output tensor of shape (batch_size, embed_dim).
+        """
+        weights = self.linear(x)  # (bs, seq_len, embed_dim) -> (bs, seq_len, 1)
+
+        # Apply the mask before softmax to ignore padding
+        if mask is not None:
+            # .unsqueeze(-1): (bs, seq_len) -> (bs, seq_len, 1)
+            fill = torch.finfo(weights.dtype).min
+            # Assign a very negative value where the mask is True (padding)
+            weights.masked_fill_(mask.unsqueeze(-1), fill)
+
+        weights = torch.softmax(weights, dim=1)  # Now masked elements will have ~0 weight
+
+        # Weighted sum (bs, seq_len, 1) * (bs, seq_len, embed_dim) -> (bs, embed_dim)
+        x = torch.sum(weights * x, dim=1) 
+
+        return x
+    
 class SSLModel(nn.Module):
-    """
-    Un modello end-to-end che classifica un'intera intervista.
-    Contiene un estrattore di feature (Wav2Vec2) e un classificatore di sequenza (Transformer).
-    """
     def __init__(self, config: SSLConfig):
         super(SSLModel, self).__init__()
-        self.config = config
-        self.model_name = config.model_name
-        self.transformer_d_model = config.transformer_d_model  
-        self.transformer_nhead = config.transformer_nhead
-        self.transformer_num_layers = config.transformer_num_layers
+        model_name = config.model_name
 
-        self.wav2vec = Wav2Vec2Model.from_pretrained(self.model_name)
-
-        for param in self.wav2vec.parameters():
+        # SSL model loading & config
+        self.ssl_model = AutoModel.from_pretrained(model_name, output_hidden_states=True)
+        self.ssl_hidden_size = self.ssl_model.config.hidden_size # e.g. 768
+        
+        # Freeze SSL weights 
+        for param in self.ssl_model.parameters():
             param.requires_grad = False
         
-        wav2vec_output_dim = self.wav2vec.config.hidden_size # Di solito è 768 per il modello base
+        '''
+        # Weighted sum of SSL model's hidden layers
+        num_ssl_layers = self.ssl_model.config.num_hidden_layers
+        layers_to_aggregate = num_ssl_layers + 1 # +1 for the initial embeddings
 
-        # Dobbiamo proiettare l'output di Wav2Vec2 (768) alla dimensione del Transformer (128).
-        self.input_projection = nn.Linear(wav2vec_output_dim, self.transformer_d_model)
-
-        # --- FASE 2: Classificatore di Sequenza (Intervista) ---
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=self.transformer_d_model,
-            nhead=self.transformer_nhead,
-            dim_feedforward=self.transformer_d_model * 4, # Scelta comune
-            dropout=0.1,
-            activation='relu',
-            batch_first=True # (Batch, Seq, Feature)
+        self.layer_weights = nn.Parameter(torch.ones(layers_to_aggregate))
+        self.layer_norms = nn.ModuleList(
+            [nn.LayerNorm(self.ssl_hidden_size) for _ in range(layers_to_aggregate)]
         )
-        self.sequence_transformer = nn.TransformerEncoder(encoder_layer, num_layers=self.transformer_num_layers)
+        self.softmax = nn.Softmax(dim=-1)
+        '''
 
-        # Aggiungiamo un token [CLS] "imparabile" all'inizio di ogni sequenza di intervista.
-        # La sua rappresentazione finale verrà usata per la classificazione.
-        self.cls_token = nn.Parameter(torch.randn(1, 1, self.transformer_d_model))
+        # Segment-level pooling
+        self.segment_embeddings_pooling = AttentionPoolingLayer(embed_dim=self.ssl_hidden_size)
+        self.segment_embedding_dim = self.ssl_hidden_size 
 
-        # Testa di classificazione finale
-        self.classifier_head = nn.Linear(self.transformer_d_model, 1) # Output singolo per classificazione binaria
+        self.seq_model_type = config.seq_model_type
+        self.seq_hidden_size = config.seq_hidden_size
+        self.dropout = config.dropout_rate
+        self.num_layers = config.seq_num_layers
 
-    def forward(self, interviews_batch: List[torch.Tensor]) -> torch.Tensor:
-        """
-        Prende in input una lista di interviste e restituisce i logits.
-        interviews_batch: una lista di tensori. Ogni tensore ha shape 
-                          (num_utterances, audio_samples) e rappresenta un'intervista.
-        """
-        
-        # --- Logica per gestire il batch di interviste (la parte più complessa) ---
-        
-        # 1. Raccogliamo tutte le utterance da tutte le interviste in un unico mega-batch.
-        #    Questo ci permette di processarle tutte in una volta con Wav2Vec2 (molto efficiente).
-        utterance_counts = [interview.shape[0] for interview in interviews_batch]
-        all_utterances = torch.cat(interviews_batch, dim=0) # Shape: (total_num_utterances, audio_samples)
+        if self.seq_model_type == 'bilstm':
+            self.sequence_model = nn.LSTM(
+                input_size=self.ssl_hidden_size,
+                hidden_size=self.seq_hidden_size,
+                num_layers=self.num_layers,
+                batch_first=True,
+                dropout=self.dropout,
+                bidirectional=True
+            )
+            self.seq_output_dim = self.seq_hidden_size * 2  # bidirectional
+        elif self.seq_model_type == 'transformer':
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=self.seq_hidden_size,
+                nhead=config.transformer_nhead,  # nhead must be a divisor of ssl_hidden_size (e.g. 768 % 8 == 0)
+                dim_feedforward=self.seq_hidden_size * 2, # Common practice
+                dropout=self.dropout,
+                activation='relu',
+                batch_first=True 
+            )
+            self.sequence_model = nn.TransformerEncoder(encoder_layer, num_layers=self.num_layers)
+            self.seq_output_dim = self.seq_hidden_size
 
-        # --- FASE 1: Estrazione Feature per ogni utterance ---
-        
-        # Passiamo tutte le utterance attraverso Wav2Vec2
-        # `last_hidden_state` ha shape: (total_num_utterances, num_frames, 768)
-        hidden_states = self.wav2vec(all_utterances).last_hidden_state
-        
-        # Facciamo il pooling sul tempo (dim=1) per ottenere un vettore per utterance
-        # Shape: (total_num_utterances, 768)
-        utterance_embeddings_768 = torch.mean(hidden_states, dim=1)
-        
-        # Proiettiamo da 768 a 128 dimensioni
-        # Shape: (total_num_utterances, 128)
-        utterance_embeddings_128 = self.input_projection(utterance_embeddings_768)
+        self.audio_embedding_pooling = AttentionPoolingLayer(embed_dim=self.seq_output_dim)
+        self.audio_embedding_dim = self.seq_output_dim
 
-        # 2. Ricostruiamo le sequenze di embedding per ogni intervista
-        # `torch.split` è l'inverso di `torch.cat`.
-        # `interview_sequences` è ora una tupla di tensori, dove ogni tensore
-        # ha shape (num_utterances_in_this_interview, 128)
-        interview_sequences = torch.split(utterance_embeddings_128, utterance_counts)
-
-        # --- FASE 2: Classificazione delle sequenze ---
-
-        # 3. Aggiungiamo il token [CLS] all'inizio di ogni sequenza
-        batch_size = len(interviews_batch)
-        cls_tokens = self.cls_token.expand(batch_size, -1, -1) # Espandi per il batch
-        
-        # Uniamo il token [CLS] con le sequenze di utterance
-        interview_sequences_with_cls = [
-            torch.cat([cls_tokens[i], seq], dim=0) for i, seq in enumerate(interview_sequences)
-        ]
-
-        # 4. Padding delle sequenze alla stessa lunghezza per il Transformer
-        # `pad_sequence` prende una lista di tensori e li "impila" in un unico tensore,
-        # aggiungendo padding dove necessario.
-        padded_sequences = nn.utils.rnn.pad_sequence(interview_sequences_with_cls, batch_first=True, padding_value=0.0)
-        # `padded_sequences` ha shape: (batch_size, max_interview_len, 128)
-        
-        # Creiamo una maschera per dire al Transformer di ignorare il padding
-        # `src_key_padding_mask` ha shape (batch_size, max_interview_len)
-        padding_mask = (padded_sequences.sum(dim=-1) == 0) # Semplice modo per trovare il padding
-
-        # 5. Passiamo le sequenze attraverso il Transformer
-        transformer_output = self.sequence_transformer(
-            src=padded_sequences,
-            src_key_padding_mask=padding_mask
+        self.classifier = nn.Sequential(
+            nn.Linear(self.audio_embedding_dim, self.ssl_hidden_size),
+            nn.Dropout(self.dropout),
+            nn.ReLU(),
+            nn.Linear(self.ssl_hidden_size, 1),
         )
-        # `transformer_output` ha shape: (batch_size, max_interview_len, 128)
 
-        # 6. Prendiamo l'output corrispondente al solo token [CLS] (è in posizione 0)
-        cls_output = transformer_output[:, 0, :] # Shape: (batch_size, 128)
+        self.init_weights()
+    
+    def init_weights(self):
+        # initialize weights of classifier
+        for name, param in self.classifier.named_parameters():
+            if 'weight' in name and len(param.shape) > 1:
+                nn.init.xavier_normal_(param)
+            elif 'bias' in name:
+                nn.init.constant_(param, 0)
+
+
+    def forward(self, batch):
+        input_values = batch['input_values']
+        attention_mask = batch.get('attention_mask', None) 
+        batch_size, num_segments, seq_len = input_values.shape
         
-        # 7. Classificazione finale
-        logits = self.classifier_head(cls_output) # Shape: (batch_size, 1)
+        # Reshape from (bs, num_segments, seq_len) to (bs * num_segments, seq_len)
+        # This allows processing all segments from all audio files in one go.
+        input_values_flat = input_values.view(batch_size * num_segments, seq_len)
         
-        return logits
+        ssl_hidden_states = self.ssl_model(
+            input_values=input_values_flat,
+            return_dict=True,
+        ).hidden_states  # (bs * num_segments, num_frames, hidden_size)
+        
+        '''
+        # Combine all hidden layers from the SSL model using learned weights.
+        ssl_hidden_state = torch.zeros_like(ssl_hidden_states[-1])  # (bs * num_segments, num_frames, hidden_size)
+        weights = self.softmax(self.layer_weights)
+        for i in range(len(ssl_hidden_states)):
+            ssl_hidden_state += weights[i] * self.layer_norms[i](ssl_hidden_states[i])
+        '''
+        ssl_hidden_state = ssl_hidden_states[-1]  # Use the last hidden state directly
+
+        # Pool the sequence of frames into a single representation for the whole segment.
+        segment_embeddings_flat = self.segment_embeddings_pooling(ssl_hidden_state)  # (bs * num_segments, segment_embedding_dim)
+
+        # Un-flatten the batch to restore sequence structure 
+        # Reshape from (bs * num_segments, segment_embedding_dim) back to (bs, num_segments, segment_embedding_dim)
+        segment_embeddings = segment_embeddings_flat.view(batch_size, num_segments, self.segment_embedding_dim)
+
+        # Sequence modeling across segments
+        # Process the sequence of segment embeddings for each audio file.
+        if self.seq_model_type == 'bilstm':
+            sequence_output, _ = self.sequence_model(segment_embeddings)
+        elif self.seq_model_type == 'transformer':
+            sequence_output = self.sequence_model(segment_embeddings, src_key_padding_mask=attention_mask)
+        # Result shape: (bs, num_segments, seq_output_dim)
+        
+        # Pool the sequence of segments into a single representation for the whole audio file.
+        audio_embeddings = self.audio_embedding_pooling(sequence_output, mask=attention_mask)  # (bs, audio_embedding_dim)
+
+        output = self.classifier(audio_embeddings)  # (bs, 1)
+
+        return output

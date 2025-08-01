@@ -1,19 +1,19 @@
 class SSLConfig:
     def __init__(self):
-        self.model_name = 'facebook/wav2vec2-base-960h'
         self.edaic_aug = False
         self.balance_segments = False
         self.eval_strategy = 'majority'
         
         self.sample_rate = 16000
         self.max_utt_seconds = 10.0
-        self.min_utt_seconds = 1.0
-        self.utt_overlap = 2.0
+        self.max_segments = 200
 
-        self.dropout_rate = 0.2
-        self.transformer_d_model = 128
+        self.dropout_rate = 0.1
+        self.model_name = 'facebook/wav2vec2-base-960h'
+        self.seq_model_type = 'transformer'
+        self.seq_hidden_size = 128
+        self.seq_num_layers = 2
         self.transformer_nhead = 4
-        self.transformer_num_layers = 2
 
         self.epochs = 50
         self.batch_size = 4
