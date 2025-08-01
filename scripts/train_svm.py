@@ -1,11 +1,12 @@
 import numpy as np
 
-from src.src_utils import clear_cache
+from src.src_utils import clear_cache, set_seed
 from src.svm_module.config import SVMConfig
 from src.svm_module.data_loader import DataLoader
 from src.svm_module.model import SVMModel
 
 def main():
+    set_seed(42)
     config = SVMConfig()
     data_loader = DataLoader(config)
     all_train_X, all_dev_X = [], []

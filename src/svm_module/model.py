@@ -33,7 +33,7 @@ class SVMModel:
             scoring = 'f1_macro',
             verbose = 1,
             n_jobs = -1
-            )
+        )
 
         grid.fit(X, y)
 

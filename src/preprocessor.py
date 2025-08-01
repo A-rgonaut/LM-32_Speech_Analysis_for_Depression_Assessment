@@ -130,7 +130,7 @@ class E1_DAIC():
                 interview_id = int(interview_id_str)
                 audio_path = f'{interview}/{interview_id}_AUDIO.wav'
                 
-                audio, sr = librosa.load(audio_path, sr=None)
+                audio, sr = librosa.load(audio_path, sr=16000)
                 audio = audio / np.max(np.abs(audio))
 
                 if interview_id < 600:
@@ -270,6 +270,8 @@ class E1_DAIC():
         edaic_durations = {0: 0.0, 1: 0.0}
         daic_utterance_durations = []
         edaic_utterance_durations = []
+        daic_audio_durations = {0: [], 1: []}
+        edaic_audio_durations = {0: [], 1: []}
 
         for _, row in split.iterrows():
             participant_id = row['Participant_ID']
@@ -284,15 +286,29 @@ class E1_DAIC():
             if participant_id >= 600:
                 edaic_durations[phq_bin] += duration
                 edaic_utterance_durations.extend(utt_durs.tolist())
+                edaic_audio_durations[phq_bin].append(duration)
             else:
                 daic_durations[phq_bin] += duration
                 daic_utterance_durations.extend(utt_durs.tolist())
+                daic_audio_durations[phq_bin].append(duration)
 
         print("\nAudio duration statistics (in minutes):")
         print(f"  Class 0: {daic_durations[0]:.2f} min")
         print(f"  Class 1: {daic_durations[1]:.2f} min (E-DAIC: {edaic_durations[1]:.2f} min)")
         print(f"  Total:   {daic_durations[0] + daic_durations[1]:.2f} min " + \
               f"(with E-DAIC: {daic_durations[0] + daic_durations[1] + edaic_durations[1]:.2f} min)")
+        
+        for cls in [0, 1]:
+            print(f"  Average DAIC audio duration class {cls}: {np.mean(daic_audio_durations[cls]):.2f} min")
+            if edaic_audio_durations[cls]:
+                print(f"  Average E-DAIC audio duration class {cls}: {np.mean(edaic_audio_durations[cls]):.2f} min")
+        all_daic = daic_audio_durations[0] + daic_audio_durations[1]
+        all_edaic = edaic_audio_durations[0] + edaic_audio_durations[1]
+        print(f"  Average total DAIC audio duration: {np.mean(all_daic):.2f} min")
+        print(f"  Longest DAIC audio: {np.max(all_daic):.2f} min")
+        if all_edaic:
+            print(f"  Average total E-DAIC audio duration: {np.mean(all_edaic):.2f} min")
+            print(f"  Longest E-DAIC audio: {np.max(all_edaic):.2f} min")
         
         if daic_utterance_durations:
             avg_utt = np.mean(daic_utterance_durations)

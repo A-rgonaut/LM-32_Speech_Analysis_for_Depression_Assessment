@@ -4,8 +4,10 @@ import numpy as np
 from src.svm_module.config import SVMConfig
 from src.svm_module.data_loader import DataLoader
 from src.svm_module.evaluator import Evaluator
+from src.src_utils import set_seed
 
 def main():
+    set_seed(42)  
     model_names = [
         'svm_model_articulation.pkl',
         'svm_model_phonation.pkl',

@@ -1,6 +1,8 @@
 from src.preprocessor import E1_DAIC
+from src.src_utils import set_seed
 
 def main():
+    set_seed(42)
     e1_daic = E1_DAIC('datasets/DAIC-WOZ/', 'datasets/E-DAIC-WOZ/', 'datasets/E1-DAIC-WOZ/')
     train, test, dev = e1_daic.get_dataset_splits()
 

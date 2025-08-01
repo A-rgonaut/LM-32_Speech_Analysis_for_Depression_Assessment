@@ -4,7 +4,7 @@ import torch
 import torchaudio
 import numpy as np
 from collections import Counter
-from torch.utils.data import Dataset as TorchDataset, DataLoader as TorchDataLoader, Sampler
+from torch.utils.data import Dataset as TorchDataset, DataLoader as TorchDataLoader
 
 from .config import CNNConfig
 from ..src_utils import get_splits, filter_edaic_samples
@@ -140,25 +140,6 @@ class DataLoader():
     def load_data(self):
         train_dataset, test_dataset, dev_dataset = self.__get_generators()
 
-        if self.balance_segments:
-            train_batch_sampler = BalancedBatchSampler(train_dataset, self.batch_size)
-            train_loader = TorchDataLoader(
-                train_dataset,
-                batch_sampler=train_batch_sampler,
-                num_workers=os.cpu_count(),
-                pin_memory=True
-            )
-        else:
-            train_loader = TorchDataLoader(
-                train_dataset, 
-                batch_size = self.batch_size,
-                shuffle=True,
-                num_workers=os.cpu_count(),
-                pin_memory=True
-            )
-        
-        '''
-        # Testare se serve effettivamente anche bilanciare il batch perfettamente
         train_loader = TorchDataLoader(
             train_dataset, 
             batch_size = self.batch_size,
@@ -166,59 +147,19 @@ class DataLoader():
             num_workers=os.cpu_count(),
             pin_memory=True
         )
-        '''
             
         test_loader = TorchDataLoader(
             test_dataset, 
             batch_size = self.batch_size, 
-            num_workers = os.cpu_count())
+            num_workers = os.cpu_count(),
+            pin_memory=True
+        )
         
         dev_loader = TorchDataLoader(
             dev_dataset, 
             batch_size = self.batch_size, 
-            num_workers = os.cpu_count())
+            num_workers = os.cpu_count(),
+            pin_memory=True
+        )
 
         return train_loader, test_loader, dev_loader
-    
-
-class BalancedBatchSampler(Sampler):
-    def __init__(self, dataset, batch_size):
-        self.dataset = dataset
-        self.batch_size = batch_size
-        
-        # Assicurati che il batch size sia pari per un bilanciamento 50/50
-        if self.batch_size % 2 != 0:
-            raise ValueError("Batch size must be even for balanced sampling.")
-
-        # Ottieni gli indici dei segmenti per ogni classe
-        self.depressed_indices = []
-        self.non_depressed_indices = []
-        for i, segment_info in enumerate(self.dataset.segment_indices):
-            audio_id = segment_info[0]
-            label = self.dataset.labels[audio_id]
-            if label == 1:
-                self.depressed_indices.append(i)
-            else:
-                self.non_depressed_indices.append(i)
-        
-        self.num_batches = min(len(self.depressed_indices), len(self.non_depressed_indices)) // (self.batch_size // 2)
-
-    def __iter__(self):
-        # Mischia gli indici all'inizio di ogni epoca
-        random.shuffle(self.depressed_indices)
-        random.shuffle(self.non_depressed_indices)
-        
-        samples_per_class = self.batch_size // 2
-        for i in range(self.num_batches):
-            start_dep = i * samples_per_class
-            start_non_dep = i * samples_per_class
-            
-            dep_batch = self.depressed_indices[start_dep : start_dep + samples_per_class]
-            non_dep_batch = self.non_depressed_indices[start_non_dep : start_non_dep + samples_per_class]
-            
-            batch = dep_batch + non_dep_batch
-            random.shuffle(batch) # Mischia i campioni all'interno del batch
-            yield batch
-
-    def __len__(self):
-        return self.num_batches

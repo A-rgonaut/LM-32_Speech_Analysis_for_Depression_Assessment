@@ -8,11 +8,16 @@ from sklearn.metrics import confusion_matrix, accuracy_score, roc_auc_score, cla
 def clear_cache():
     gc.collect()
     torch.cuda.empty_cache()
-    np.random.seed(42) 
-    torch.manual_seed(42)
-    
+
+def set_seed(seed: int = 42):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(42)
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 def filter_edaic_samples(splits: Tuple[pd.DataFrame, ...]) -> List[pd.DataFrame]:
     """Filters out augmented E-DAIC samples (ID >= 600) from a tuple of dataframes."""

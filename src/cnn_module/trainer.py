@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+import os
 from sklearn.model_selection import ParameterGrid
 
 from .config import CNNConfig
@@ -14,7 +15,7 @@ class Trainer():
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
-        self.optimizer = torch.optim.Adam(model.parameters(), lr = config.learning_rate)
+        self.optimizer = torch.optim.AdamW(model.parameters(), lr = config.learning_rate)
         self.scheduler = None
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.criterion = nn.BCEWithLogitsLoss()
@@ -156,6 +157,8 @@ class Trainer():
         if best_model_weights is None:
             best_model_weights = self.model.state_dict().copy()
 
+        if not os.path.exists(os.path.dirname(self.config.model_save_path)):
+            os.makedirs(os.path.dirname(self.config.model_save_path))
         torch.save(best_model_weights, self.config.model_save_path)
 
         return early_stopping.best_score, best_epoch

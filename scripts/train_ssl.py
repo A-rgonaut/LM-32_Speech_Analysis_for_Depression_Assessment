@@ -6,8 +6,10 @@ from src.ssl_module.config import SSLConfig
 from src.ssl_module.data_loader import DataLoader
 from src.ssl_module.model import SSLModel
 from src.ssl_module.trainer import Trainer
+from src.src_utils import set_seed
 
 def main():
+    set_seed(42)
     load_dotenv()
 
     experiment = Experiment(

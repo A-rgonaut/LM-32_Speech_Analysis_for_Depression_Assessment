@@ -1,9 +1,8 @@
 class CNNConfig:
     def __init__(self):
         self.edaic_aug = False
-        # Da provare, al momento si otteneva F1 0.6 con edaic_aug a False e balance_segments a False
-        self.balance_segments = True 
-        self.eval_strategy = 'majority'
+        self.balance_segments = True
+        self.eval_strategy = 'average'
         
         self.sample_rate = 16000
         self.segment_samples = 64_000 

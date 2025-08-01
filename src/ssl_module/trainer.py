@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+import os
 from sklearn.model_selection import ParameterGrid
 
 from .config import SSLConfig
@@ -36,6 +37,7 @@ class Trainer():
             correct_predictions += torch.sum(preds == label)
             
             loss.backward()
+            #torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
         if self.scheduler:
             self.scheduler.step()
@@ -106,7 +108,9 @@ class Trainer():
 
         if best_model_weights is None:
             best_model_weights = self.model.state_dict().copy()
-
+        
+        if not os.path.exists(os.path.dirname(self.config.model_save_path)):
+            os.makedirs(os.path.dirname(self.config.model_save_path))
         torch.save(best_model_weights, self.config.model_save_path)
 
         return early_stopping.best_score, best_epoch

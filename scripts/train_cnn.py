@@ -6,8 +6,10 @@ from src.cnn_module.config import CNNConfig
 from src.cnn_module.data_loader import DataLoader
 from src.cnn_module.model import CNNModel
 from src.cnn_module.trainer import Trainer
+from src.src_utils import set_seed
 
 def main():
+    set_seed(42)
     load_dotenv()
 
     experiment = Experiment(

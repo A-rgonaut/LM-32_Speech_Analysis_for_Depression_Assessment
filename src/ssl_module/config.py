@@ -1,12 +1,15 @@
 class SSLConfig:
     def __init__(self):
         self.edaic_aug = False
-        self.balance_segments = False
-        self.eval_strategy = 'majority'
         
         self.sample_rate = 16000
         self.max_utt_seconds = 10.0
-        self.max_segments = 200
+        self.max_segments = 70
+
+        self.use_subdialogue_shuffling = True
+        self.subdialogue_M_pos = 20
+        self.subdialogue_len_low = 0.5        
+        self.subdialogue_len_high = 0.9
 
         self.dropout_rate = 0.1
         self.model_name = 'facebook/wav2vec2-base-960h'
@@ -16,7 +19,7 @@ class SSLConfig:
         self.transformer_nhead = 4
 
         self.epochs = 50
-        self.batch_size = 4
+        self.batch_size = 8
         self.learning_rate = 0.001
         self.early_stopping_patience = 5
         self.early_stopping_min_delta = 0.01
