@@ -6,6 +6,8 @@ class SSLConfig:
         self.max_utt_seconds = 10.0
         self.max_segments = 70
 
+        self.feature_path = 'features/wav2vec2_base_960h/'
+
         self.use_subdialogue_shuffling = True
         self.subdialogue_M_pos = 20
         self.subdialogue_len_low = 0.5        
@@ -26,10 +28,10 @@ class SSLConfig:
         self.early_stopping_mode = 'max'
         
         self.grid_params = {
-            'batch_size' : [16, 32, 64],
-            'learning_rate' : [0.001, 0.0005],
-            'segment_ms' : [250, 500],
-            'spectrogram_window_frames' : [100, 120, 140]
+            'learning_rate' : [1e-3, 5e-4, 1e-4],
+            'seq_hidden_size': [128, 256],
+            'seq_num_layers': [1, 2],
+            'dropout_rate': [0.1, 0.25, 0.5]
         }
 
         self.model_save_path = "saved_models/ssl_model.pth"

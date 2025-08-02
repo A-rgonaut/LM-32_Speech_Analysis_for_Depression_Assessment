@@ -25,12 +25,12 @@ class Trainer():
         self.model.train()
         tot_loss, correct_predictions = 0, 0
         for batch in tqdm(self.train_loader):
-            inputs = batch['input_values'].to(self.device)
+            inputs = batch['features'].to(self.device)
             label = batch['label'].to(self.device)
             attention_mask = batch['attention_mask'].to(self.device)
             self.optimizer.zero_grad()
 
-            outputs = self.model({'input_values': inputs, 'attention_mask': attention_mask})
+            outputs = self.model({'features': inputs, 'attention_mask': attention_mask})
             loss = self.criterion(outputs.squeeze(1), label)
             tot_loss += loss.item()
             preds = (torch.sigmoid(outputs.squeeze(1)) > 0.5).float()
@@ -54,10 +54,10 @@ class Trainer():
     
         with torch.no_grad():
             for batch in tqdm(self.val_loader):
-                inputs = batch['input_values'].to(self.device)  
+                inputs = batch['features'].to(self.device)  
                 label = batch['label'].to(self.device)    
                 attention_mask = batch['attention_mask'].to(self.device)     
-                outputs = self.model({'input_values': inputs, 'attention_mask': attention_mask})
+                outputs = self.model({'features': inputs, 'attention_mask': attention_mask})
 
                 loss = self.criterion(outputs.squeeze(1), label)
                 total_loss += loss.item()

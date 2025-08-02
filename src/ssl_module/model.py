@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from transformers import AutoModel
 
 from .config import SSLConfig
 
@@ -37,16 +36,9 @@ class AttentionPoolingLayer(nn.Module):
 class SSLModel(nn.Module):
     def __init__(self, config: SSLConfig):
         super(SSLModel, self).__init__()
-        model_name = config.model_name
 
-        # SSL model loading & config
-        self.ssl_model = AutoModel.from_pretrained(model_name, output_hidden_states=True)
-        self.layer_to_extratct = 8
-        self.ssl_hidden_size = self.ssl_model.config.hidden_size # e.g. 768
+        self.ssl_hidden_size = 768
         
-        # Freeze SSL weights 
-        for param in self.ssl_model.parameters():
-            param.requires_grad = False
         '''      
         # Weighted sum of SSL model's hidden layers
         num_ssl_layers = self.ssl_model.config.num_hidden_layers
@@ -115,63 +107,28 @@ class SSLModel(nn.Module):
 
 
     def forward(self, batch):
-        input_values = batch['input_values'] # (bs, num_segments, seq_len)
+        ssl_hidden_state = batch['features'] # (bs, num_segments, num_frames, seq_len)
         attention_mask = batch.get('attention_mask', None) # (bs, num_segments)
-        batch_size = input_values.shape[0]
+        batch_size, num_segments, _, _ = ssl_hidden_state.shape
 
-        all_audio_embeddings = []
-        for i in range(batch_size):
-            segments_for_one_audio = input_values[i] # (num_segments, max_utt_seconds * sample_rate)
-            
-            micro_batch_size = 256  # Dimensione del micro-batch
-            processed_segments = []
-            
-            for j in range(0, segments_for_one_audio.shape[0], micro_batch_size):
-                micro_batch = segments_for_one_audio[j : j + micro_batch_size]
-                
-                # Ora wav2vec2 vede al massimo micro_batch_size segmenti alla volta
-                with torch.no_grad():
-                    ssl_hidden_state = self.ssl_model(
-                        input_values=micro_batch,
-                        return_dict=True,
-                    ).hidden_states[self.layer_to_extratct] # (bs * num_segments, num_frames, hidden_size)
-                '''
-                # Combine all hidden layers from the SSL model using learned weights.
-                ssl_hidden_state = torch.zeros_like(ssl_hidden_states[-1])  # (bs * num_segments, num_frames, hidden_size)
-                weights = self.softmax(self.layer_weights)
-                for i in range(len(ssl_hidden_states)):
-                    ssl_hidden_state += weights[i] * self.layer_norms[i](ssl_hidden_states[i])
-                '''
-
-                pooled_segment = self.segment_embeddings_pooling(ssl_hidden_state)
-                processed_segments.append(pooled_segment)
-                
-            # Unisci i risultati dei micro-batch
-            segment_embeddings = torch.cat(processed_segments, dim=0) # Shape: (num_segments, ssl_hidden_size)
-            all_audio_embeddings.append(segment_embeddings)
-
-        # Stack per ricreare il batch
-        segment_embeddings_batch = torch.stack(all_audio_embeddings) # Shape: (bs, num_segments, ssl_hidden_size)
-        """
-        # Reshape from (bs, num_segments, seq_len) to (bs * num_segments, seq_len)
-        # This allows processing all segments from all audio files in one go.
-        input_values_flat = input_values.view(batch_size * num_segments, seq_len)
-        
-        with torch.no_grad():
-            ssl_hidden_state = self.ssl_model(
-                input_values=input_values_flat,
-                return_dict=True,
-            ).last_hidden_state # (bs * num_segments, num_frames, hidden_size)
+        '''
+        # Combine all hidden layers from the SSL model using learned weights.
+        ssl_hidden_state = torch.zeros_like(ssl_hidden_states[-1])  # (bs * num_segments, num_frames, hidden_size)
+        weights = self.softmax(self.layer_weights)
+        for i in range(len(ssl_hidden_states)):
+            ssl_hidden_state += weights[i] * self.layer_norms[i](ssl_hidden_states[i])
+        '''
+        ssl_hidden_state_flat = ssl_hidden_state.view(batch_size * num_segments, ssl_hidden_state.shape[2], self.ssl_hidden_size)
 
         # Pool the sequence of frames into a single representation for the whole segment.
-        segment_embeddings_flat = self.segment_embeddings_pooling(ssl_hidden_state)  # (bs * num_segments, segment_embedding_dim)
+        segment_embeddings_flat = self.segment_embeddings_pooling(ssl_hidden_state_flat)  # (bs * num_segments, segment_embedding_dim)
 
         # Un-flatten the batch to restore sequence structure 
         # Reshape from (bs * num_segments, segment_embedding_dim) back to (bs, num_segments, segment_embedding_dim)
         segment_embeddings = segment_embeddings_flat.view(batch_size, num_segments, self.segment_embedding_dim)
-        """
+
         # Project embeddings to the desired dimension for the sequence model
-        projected_embeddings = self.projection(segment_embeddings_batch) # (bs, num_segments, seq_hidden_size)
+        projected_embeddings = self.projection(segment_embeddings) # (bs, num_segments, seq_hidden_size)
 
         # Sequence modeling across segments
         # Process the sequence of segment embeddings for each audio file.

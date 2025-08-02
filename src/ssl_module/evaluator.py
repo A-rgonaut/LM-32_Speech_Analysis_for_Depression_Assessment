@@ -19,10 +19,10 @@ class Evaluator:
         targets = []
         with torch.no_grad():
             for batch in tqdm(self.test_loader):
-                inputs = batch['input_values'].to(self.device)
+                inputs = batch['features'].to(self.device)
                 labels = batch['label'].to(self.device)
                 attention_mask = batch['attention_mask'].to(self.device)
-                outputs = self.model({'input_values': inputs, 'attention_mask': attention_mask})
+                outputs = self.model({'features': inputs, 'attention_mask': attention_mask})
                 preds = (torch.sigmoid(outputs.squeeze(1)) > 0.5).float()
                 predictions.extend(preds.cpu().numpy())
                 targets.extend(labels.cpu().numpy())
