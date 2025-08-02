@@ -6,7 +6,7 @@ import pandas as pd
 from torch.utils.data import Dataset as TorchDataset, DataLoader as TorchDataLoader
 from transformers import AutoFeatureExtractor
 from tqdm import tqdm
-#from audiomentations import Compose, PitchShift
+#from torch_audiomentations import Compose, PitchShift
 
 from .config import SSLConfig
 from ..src_utils import get_splits, filter_edaic_samples
@@ -60,8 +60,8 @@ class Dataset(TorchDataset):
             
             # Pad the last segment if it's shorter
             if len(segment) < self.segment_samples:
-                padding = np.zeros(self.segment_samples - len(segment), dtype=audio.dtype)
-                segment = np.concatenate([segment, padding])
+                padding = torch.zeros(self.segment_samples - len(segment), dtype=audio.dtype)
+                segment = torch.cat([segment, padding], dim=0)
 
             segments.append(segment)
 
@@ -69,7 +69,7 @@ class Dataset(TorchDataset):
             if self.max_segments and len(segments) >= self.max_segments:
                 break
         
-        return np.array(segments)
+        return torch.stack(segments)
 
     def __len__(self):
         return len(self.audio_paths)
@@ -79,6 +79,8 @@ class Dataset(TorchDataset):
         label = self.labels[idx]
         
         audio, _ = librosa.load(audio_path, sr=self.sample_rate)
+        audio = audio.squeeze()
+        audio = torch.tensor(audio, dtype=torch.float32)
         transcript_path = audio_path.replace("_AUDIO.wav", "_Transcript.csv")
         transcript_df = pd.read_csv(transcript_path)
 
@@ -249,11 +251,10 @@ class DataLoader():
             for _ in range(M):
                 # Sample e (lunghezza del sub-dialogo come frazione)
                 e_len_fraction = np.random.uniform(el, eh)
-                # Calcola d (numero di enunciati nel sub-dialogo)
-                d = max(1, int(e_len_fraction * T))
                 
-                # Sample s (indice di partenza)
+                # Calcola il numero di enunciati nel sub-dialogo
                 length = round(e_len_fraction * T)
+                # Assicura che la lunghezza sia in un range valido [1, T]
                 length = max(1, min(length, T)) 
                 d = length - 1
                 upper_bound = T - d
