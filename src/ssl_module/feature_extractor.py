@@ -1,4 +1,3 @@
-
 import os
 import torch
 import librosa
@@ -51,11 +50,6 @@ class FeatureExtractor:
         # Divide in segments of fixed length.
         for i in range(0, len(audio), self.segment_samples):
             segment = audio[i:i + self.segment_samples]
-            
-            # Pad the last segment if it's shorter
-            if len(segment) < self.segment_samples:
-                padding = torch.zeros(self.segment_samples - len(segment), dtype=audio.dtype)
-                segment = torch.cat([segment, padding], dim=0)
 
             segments.append(segment)
 
@@ -63,7 +57,7 @@ class FeatureExtractor:
             if self.max_segments and len(segments) >= self.max_segments:
                 break
         
-        return torch.stack(segments)
+        return segments
 
     @torch.no_grad()
     def extract_and_save(self, audio_paths, split_name):
@@ -73,6 +67,7 @@ class FeatureExtractor:
         output_dir = os.path.join(self.config.feature_path, split_name)
         os.makedirs(output_dir, exist_ok=True)
         print(f"Saving features for '{split_name}' split in: {output_dir}")
+        metadata = []
 
         for audio_path in tqdm(audio_paths, desc=f"Extracting features for {split_name}"):
             try:
@@ -86,16 +81,22 @@ class FeatureExtractor:
 
                 # Carica e segmenta l'audio
                 audio, _ = librosa.load(audio_path, sr=self.sample_rate)
-                transcript_path = audio_path.replace('_AUDIO.wav', '_TRANSCRIPT.csv')
+                transcript_path = audio_path.replace('_AUDIO.wav', '_Transcript.csv')
                 transcript_df = pd.read_csv(transcript_path)
-                segments = self._segment_audio_by_transcript(audio, transcript_df)
+                #segments = self._segment_audio_by_transcript(audio, transcript_df)
+                segments = self._segment_audio_fixed_length(audio)
+
+                num_segments = len(segments)
+                metadata.append({'filename': filename, 'num_segments': num_segments})
 
                 # Prepara i segmenti per il modello
                 inputs = self.feature_extractor(
                     segments, 
                     sampling_rate=self.sample_rate, 
                     return_tensors="pt", 
-                    padding=True
+                    max_length=self.segment_samples,
+                    padding='max_length',
+                    truncation=True
                 )
                 
                 # Sposta i dati sul dispositivo corretto
@@ -107,10 +108,16 @@ class FeatureExtractor:
                 # `outputs.hidden_states` è una tupla di tensori.
                 # Ogni tensore ha shape (num_segments, num_frames, hidden_size)
                 # Li spostiamo su CPU prima di salvarli
-                hidden_states_cpu = tuple(h.cpu() for h in outputs.hidden_states)
+                #hidden_states_cpu = tuple(h.cpu() for h in outputs.hidden_states)
+                hidden_state_cpu = outputs.hidden_states[self.config.layer_to_extract].cpu()
                 
                 # Salva la tupla di tensori
-                torch.save(hidden_states_cpu, save_path)
+                #torch.save(hidden_states_cpu, save_path)
+                torch.save(hidden_state_cpu, save_path)
 
             except Exception as e:
                 print(f"Error processing {audio_path}: {e}")
+            
+        metadata_path = os.path.join(self.config.feature_path, f'{split_name}_metadata.csv')
+        pd.DataFrame(metadata).to_csv(metadata_path, index=False)
+        print(f"Metadata saved to {metadata_path}")

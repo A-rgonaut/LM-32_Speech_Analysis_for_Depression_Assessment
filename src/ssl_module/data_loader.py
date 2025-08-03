@@ -1,11 +1,9 @@
 import os
 import torch
-import librosa
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset as TorchDataset, DataLoader as TorchDataLoader
 from tqdm import tqdm
-#from torch_audiomentations import Compose, PitchShift
 
 from .config import SSLConfig
 from ..src_utils import get_splits, filter_edaic_samples
@@ -17,7 +15,7 @@ class Dataset(TorchDataset):
         self.feature_paths = feature_paths
         self.labels = labels
         self.segment_indices = segment_indices
-        self.layer_to_extract = 8
+        self.layer_to_extract = config.layer_to_extract
 
     def __len__(self):
         return len(self.feature_paths)
@@ -28,21 +26,23 @@ class Dataset(TorchDataset):
 
         # Carica tutti gli hidden states pre-calcolati per un audio
         # hidden_states è una tupla di tensori: (num_layers, num_segments, num_frames, hidden_size)
-        hidden_states = torch.load(feature_path, map_location='cpu')
+        # hidden_states = torch.load(feature_path, map_location='cpu')
+        hidden_state = torch.load(feature_path, map_location='cpu') # (num_segments, num_frames, hidden_size))
         
         # Estrai solo l'hidden state che ti interessa
         # Shape: (num_segments, num_frames, hidden_size)
-        segment_features = hidden_states[self.layer_to_extract]
+        #segment_features = hidden_states[self.layer_to_extract]
 
         # Se stai usando sub-dialogue shuffling, seleziona solo i segmenti pertinenti
         if self.segment_indices and self.segment_indices[idx] is not None:
             start_idx, end_idx = self.segment_indices[idx]
-            segment_features = segment_features[start_idx:end_idx+1]
+            #segment_features = segment_features[start_idx:end_idx+1]
+            hidden_state = hidden_state[start_idx:end_idx+1]
 
-        num_segments = segment_features.shape[0]
+        num_segments = hidden_state.shape[0]
 
         return {
-            'features': segment_features, 
+            'features': hidden_state, 
             'label': torch.tensor(label, dtype=torch.float32),
             'num_segments': num_segments
         }
@@ -88,19 +88,35 @@ class DataLoader():
         self.batch_size = config.batch_size
         self.preprocessor = E1_DAIC(config.daic_path, config.e_daic_path, config.e1_daic_path)
         self.splits = self.preprocessor.get_dataset_splits()
+        splits_tuple = {'train': self.splits[0], 'test': self.splits[1], 'dev': self.splits[2]}
         if not self.config.edaic_aug:
             self.splits = filter_edaic_samples(self.splits)
+
+        self.participant_to_split = {}
+        for split_name, split_data in splits_tuple.items():
+            for participant_id in split_data['Participant_ID']:
+                self.participant_to_split[str(participant_id)] = split_name
+        self.metadata = {}
+        self._load_metadata()
+
+    def _load_metadata(self):
+        """Carica i metadati (es. num_segments) per ogni file."""
+        for split in ['train', 'test', 'dev']:
+            metadata_path = os.path.join(self.config.feature_path, f'{split}_metadata.csv')
+            df = pd.read_csv(metadata_path)
+            for _, row in df.iterrows():
+                self.metadata[row['filename']] = row['num_segments']
 
     def _get_feature_paths(self, original_audio_paths):
         """Converte i percorsi audio nei percorsi delle feature pre-calcolate."""
         feature_dir = self.config.feature_path
         feature_paths = []
         for audio_path in original_audio_paths:
-            # Es: .../300_AUDIO.wav -> 300_AUDIO.pt
-            filename = os.path.basename(audio_path).replace('.wav', '.pt')
-            # Es: features/wav2vec_base/train/300_AUDIO.pt
-            split_name = os.path.basename(os.path.dirname(audio_path)) # train, dev, o test
-            feature_paths.append(os.path.join(feature_dir, split_name, filename))
+            filename = os.path.basename(audio_path)
+            participant_id = filename.split('_')[0]
+            split_name = self.participant_to_split.get(participant_id)
+            feature_filename = filename.replace('.wav', '.pt')
+            feature_paths.append(os.path.join(feature_dir, split_name, feature_filename))
         return feature_paths
 
     def _apply_subdialogue_shuffling(self, original_paths, original_labels):
@@ -118,12 +134,9 @@ class DataLoader():
         new_paths, new_labels, new_segment_indices = [], [], []
 
         for path, label in tqdm(zip(original_paths, original_labels), total=len(original_paths), desc="Generating Sub-dialogues"):
-            # Carica le feature per ottenere il numero totale di segmenti
-            feature_path = self._get_feature_paths([path])[0]
-            if not os.path.exists(feature_path): continue
-            
-            # Carichiamo solo il primo layer per avere la shape
-            num_segments = torch.load(feature_path, map_location='cpu')[0].shape[0]
+            # Ottieni il numero di segmenti dai metadati
+            feature_filename = os.path.basename(path).replace('.wav', '.pt')
+            num_segments = self.metadata.get(feature_filename)
             
             if num_segments < 2: continue
 
@@ -148,64 +161,51 @@ class DataLoader():
         return new_paths, new_labels, new_segment_indices
 
                 
-    def __get_generators(self):
+    def get_data_loader(self, split: str):
         train_paths, train_labels, test_paths, test_labels, dev_paths, dev_labels = get_splits(self.splits)
 
-        segment_indices_train = None
-        if self.config.use_subdialogue_shuffling:
-            train_paths, train_labels, segment_indices_train = self._apply_subdialogue_shuffling(train_paths, train_labels)
-
-        train_feature_paths = self._get_feature_paths(train_paths)
-        test_feature_paths = self._get_feature_paths(test_paths)
-        dev_feature_paths = self._get_feature_paths(dev_paths)
+        if split == 'train':
+            paths, labels = train_paths, train_labels
+            segment_indices = None
+            if self.config.use_subdialogue_shuffling:
+                paths, labels, segment_indices = self._apply_subdialogue_shuffling(paths, labels)
             
-        train_dataset = Dataset(
-            feature_paths=train_feature_paths,
-            labels=train_labels,
-            config=self.config,
-            segment_indices=segment_indices_train
-        )
-
-        test_dataset = Dataset(
-            feature_paths=test_feature_paths,
-            labels=test_labels,
-            config=self.config
-        )
+            feature_paths = self._get_feature_paths(paths)
+            dataset = Dataset(
+                feature_paths=feature_paths,
+                labels=labels,
+                config=self.config,
+                segment_indices=segment_indices
+            )
+            return TorchDataLoader(
+                dataset, 
+                batch_size=self.batch_size,
+                shuffle=True,
+                num_workers=4 if os.cpu_count() > 8 else os.cpu_count(),
+                collate_fn=collate_fn_features,
+                pin_memory=True
+            )
         
-        dev_dataset = Dataset(
-            feature_paths=dev_feature_paths,
-            labels=dev_labels,
-            config=self.config
-        )
+        elif split == 'dev':
+            paths, labels = dev_paths, dev_labels
+            feature_paths = self._get_feature_paths(paths)
+            dataset = Dataset(feature_paths=feature_paths, labels=labels, config=self.config)
+            return TorchDataLoader(
+                dataset, 
+                batch_size=self.batch_size, 
+                num_workers=os.cpu_count(),
+                collate_fn=collate_fn_features,
+                pin_memory=True
+            )
 
-        return train_dataset, test_dataset, dev_dataset
-
-    def load_data(self):
-        train_dataset, test_dataset, dev_dataset = self.__get_generators()
-
-        train_loader = TorchDataLoader(
-            train_dataset, 
-            batch_size = self.batch_size,
-            shuffle=True,
-            num_workers=os.cpu_count(),
-            collate_fn=collate_fn_features,
-            pin_memory=True
-        )
-
-        test_loader = TorchDataLoader(
-            test_dataset, 
-            batch_size=self.batch_size, 
-            num_workers=os.cpu_count(),
-            collate_fn=collate_fn_features,
-            pin_memory=True
-        )
-
-        dev_loader = TorchDataLoader(
-            dev_dataset, 
-            batch_size=self.batch_size, 
-            num_workers=os.cpu_count(),
-            collate_fn=collate_fn_features,
-            pin_memory=True
-        )
-
-        return train_loader, test_loader, dev_loader
+        elif split == 'test':
+            paths, labels = test_paths, test_labels
+            feature_paths = self._get_feature_paths(paths)
+            dataset = Dataset(feature_paths=feature_paths, labels=labels, config=self.config)
+            return TorchDataLoader(
+                dataset, 
+                batch_size=self.batch_size, 
+                num_workers=os.cpu_count(),
+                collate_fn=collate_fn_features,
+                pin_memory=True
+            )

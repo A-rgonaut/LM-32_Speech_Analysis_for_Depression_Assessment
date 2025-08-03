@@ -20,7 +20,8 @@ def main():
 
     config = SSLConfig()
     data_loader = DataLoader(config)
-    train_loader, _, dev_loader = data_loader.load_data()
+    train_loader = data_loader.get_data_loader('train')
+    dev_loader = data_loader.get_data_loader('dev')
 
     model = SSLModel(config)
 

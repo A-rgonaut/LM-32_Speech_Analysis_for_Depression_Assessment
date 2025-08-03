@@ -10,7 +10,7 @@ def main():
     set_seed(42) 
     config = SSLConfig()
     data_loader = DataLoader(config)
-    _, test_loader, _ = data_loader.load_data()
+    test_loader = data_loader.get_data_loader('test')
 
     model = SSLModel(config)
     model.load_state_dict(torch.load(config.model_save_path))

@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from .config import SSLConfig
 
@@ -136,7 +137,20 @@ class SSLModel(nn.Module):
             if self.seq_model_type == 'transformer':
                 sequence_output = self.sequence_model(projected_embeddings, src_key_padding_mask=attention_mask)
             else: # bilstm
-                sequence_output, _ = self.sequence_model(projected_embeddings)
+                # 1. Calcola le lunghezze reali delle sequenze
+                # La maschera ha True per il padding, quindi contiamo i False
+                lengths = (~attention_mask).sum(dim=1).to('cpu')
+
+                # 2. "Impacchetta" la sequenza
+                packed_input = pack_padded_sequence(
+                    projected_embeddings, lengths, batch_first=True, enforce_sorted=False
+                )
+
+                # 3. Passa la sequenza impacchettata al modello
+                packed_output, _ = self.sequence_model(packed_input)
+
+                # 4. "Spacchetta" l'output per riottenere un tensore paddato
+                sequence_output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=num_segments)
         else:
             sequence_output = projected_embeddings
         # Result shape: (bs, num_segments, seq_output_dim)
