@@ -6,7 +6,7 @@ from concurrent.futures import ProcessPoolExecutor
 from .utils import process_interview
 from .config import SVMConfig
 from ..preprocessor import E1_DAIC
-from  ..src_utils import filter_edaic_samples
+from  ..utils import filter_edaic_samples
 
 class DataLoader:
     def __init__(self, config: SVMConfig):

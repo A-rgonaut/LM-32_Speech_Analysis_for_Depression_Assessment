@@ -47,23 +47,21 @@ class E1_DAIC():
         2. Concatenates and sorts the data by `Participant_ID`.
         3. Converts `PHQ_Score` >= 10 to binary label 1 in `PHQ_Binary`.
         4. Removes samples with `PHQ_Binary` == 0 and `Participant_ID` >= 600.
-        5. Adds a `Split` column indicating the data split for each participant.
-        6. Updates the `e1_daic_fold` attribute with participant folder paths.
+        5. Updates the `e1_daic_fold` attribute with participant folder paths.
         
         :returns pd.DataFrame: A DataFrame containing participant IDs, PHQ binary labels, PHQ scores, and data split information.
         """
-
         files = {'dev': self.e_daic_path + 'dev_split.csv', 
                  'test': self.e_daic_path + 'test_split.csv',
                  'train': self.e_daic_path + 'train_split.csv'}
 
         file = pd.concat([pd.read_csv(f, usecols=["Participant_ID", "PHQ_Binary", "PHQ_Score"]) 
-                          for _,f in files.items()], ignore_index=True)
+                          for _, f in files.items()], ignore_index=True)
         file = file.sort_values(by="Participant_ID")
 
         # Fixing the PHQ_Score to binary classification
         file.loc[file["PHQ_Score"] >= 10, "PHQ_Binary"] = 1
-
+        
         # Removing class 0 samples with Participant_ID >= 600
         file = file.drop(file[(file['PHQ_Binary'] == 0) & (file['Participant_ID'] >= 600)].index)
 
@@ -159,7 +157,7 @@ class E1_DAIC():
                 
                 # Remove utterances that contains <synch>, <sync> and scrubbed_entry
                 if 'value' in transcription_df.columns:
-                    transcription_df = transcription_df[~transcription_df['value'].str.contains(r'<synch>|<sync>|scrubbed_entry', case=False, na=False)]
+                    transcription_df = transcription_df[~transcription_df['value'].astype(str).str.contains(r'<synch>|<sync>|scrubbed_entry', case=False, na=False)]
 
                 # Clean up overlapping segments
                 transcription_df['Prev_End_Time'] = transcription_df['End_Time'].shift(1)
@@ -192,7 +190,6 @@ class E1_DAIC():
                 
                 # Concatenate all processed audio segments
                 final_audio = np.concatenate(segments)
-                #print(f"Interview {interview_id}: Original participant audio length: {original_len} -> Processed length: {len(final_audio)}")
                 new_transcription_df = pd.DataFrame(new_transcription_rows)
 
                 # Save the processed audio and transcription file
