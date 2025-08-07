@@ -1,6 +1,5 @@
 import os
 import joblib
-import pandas as pd
 from sklearn.svm import SVC
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.pipeline import Pipeline
@@ -8,7 +7,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 
 from .config import SVMConfig
-from ..utils import get_metrics
 
 class SVMModel:
     def __init__(self, config: SVMConfig):
@@ -28,7 +26,7 @@ class SVMModel:
             ('svm', svm_instance)
         ])
 
-    def find_best_params(self, train_X, train_y):
+    def tune_and_train(self, X, y):
         pipeline = self._create_pipeline()
         
         grid = GridSearchCV(
@@ -42,60 +40,34 @@ class SVMModel:
             cv=self.kfold,
             scoring='f1_macro',
             verbose=1,
-            n_jobs=-1
+            n_jobs=-1,
+            refit=True # Ensure the best model is refit on the entire dataset
         )
 
-        grid.fit(train_X, train_y)
-        print(f"Best parameters found: {grid.best_params_}")
-        print(f"Best cross-validation F1-score: {grid.best_score_:.4f}")
-        
-        best_params = {key.replace('svm__', ''): value for key, value in grid.best_params_.items()}
+        grid.fit(X, y)
+
+        print("Cross-Validation Results:")
+        print("Best F1 score:", grid.best_score_)
+        print(f"Best found parameters: {grid.best_params_}")
+
+        # The final model, already trained on all data, is grid.best_estimator_
+        self.model = grid.best_estimator_
+
+        best_params_raw = grid.best_params_
+        best_params = {key.replace('svm__', ''): value for key, value in best_params_raw.items()}
+
         return best_params
 
-    def train_and_evaluate_kfold(self, train_X, train_y, eval_X, eval_y, best_params):
-        fold_metrics_list = []
+    def save_model(self, feature_type):
+        path = os.path.join(self.config.model_save_dir, f'svm_model_{feature_type}.pkl')
 
-        print("Starting K-Fold Validation on Evaluation Set (using best params)")
-        for fold, (train_idx, _) in enumerate(self.kfold.split(train_X, train_y)):
-            X_train_fold, y_train_fold = train_X[train_idx], train_y[train_idx]
-            
-            pipeline = self._create_pipeline(params=best_params)
-            pipeline.fit(X_train_fold, y_train_fold)
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
 
-            eval_pred = pipeline.predict(eval_X)
-            eval_scores = pipeline.predict_proba(eval_X)[:, 1]
+        joblib.dump(self.model, path)
 
-            metrics = get_metrics(eval_y, eval_pred, eval_scores, 'f1_macro', 'accuracy', 'roc_auc', 'sensitivity', 'specificity')
-            metrics['fold'] = fold + 1
-            fold_metrics_list.append(metrics)
-            print(f"Fold {fold+1}/{self.config.k_folds} | Eval F1-Macro: {metrics['f1_macro']:.4f}")
+    def load_model(self, feature_type):
+        path = os.path.join(self.config.model_save_dir, f'svm_model_{feature_type}.pkl')
 
-        results_df = pd.DataFrame(fold_metrics_list)
-        
-        mean_metrics = results_df.mean()
-        std_metrics = results_df.std()
-        
-        mean_metrics['fold'] = 'mean'
-        std_metrics['fold'] = 'std'
-
-        results_df = pd.concat([results_df, mean_metrics.to_frame().T, std_metrics.to_frame().T], ignore_index=True)
-        results_df = results_df.set_index('fold')
-
-        print("K-Fold Validation Results (Mean ± Std on Dev Set)")
-        print(results_df.loc[['mean', 'std']])
-
-        return results_df
-    
-    def train(self, train_X, train_y, best_params):
-        self.model = self._create_pipeline(params=best_params)
-        self.model.fit(train_X, train_y)
-
-    def save_model(self):
-        if not os.path.exists(self.config.model_save_dir):
-            os.makedirs(self.config.model_save_dir)
-
-        joblib.dump(self.model, os.path.join(self.config.model_save_dir, 'svm_model.pkl'))
-
-    def load_model(self):
-        self.model = joblib.load(os.path.join(self.config.model_save_dir, 'svm_model.pkl'))
+        self.model = joblib.load(path)
         return self.model

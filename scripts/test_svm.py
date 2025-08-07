@@ -1,6 +1,4 @@
-import os
 import numpy as np
-import json
 
 from src.svm_module.config import SVMConfig
 from src.svm_module.data_loader import DataLoader
@@ -17,10 +15,6 @@ def main():
 
     for feature_type in feature_types_to_test:
         print(f"Testing model for feature: {feature_type}")
-        params_path = os.path.join(config.model_save_dir, f'svm_params_{feature_type}.json')
-        with open(params_path, 'r') as f:
-            best_params = json.load(f)
-        print(f"Best parameters for '{feature_type}' loaded from '{params_path}'")
 
         if feature_type == 'combined':
             feature_list = ['articulation', 'phonation', 'prosody']
@@ -41,23 +35,13 @@ def main():
             test_X, test_y = np.array(test_X), np.array(test_y)
 
         model = SVMModel(config)
-        kfold_results_df = model.train_and_evaluate_kfold(train_X, train_y, dev_X, dev_y, best_params)
-        dev_results_path = os.path.join(config.result_dir, f'kfold_dev_results_{feature_type}.csv')
-        kfold_results_df.to_csv(dev_results_path)
-        print(f"K-Fold dev set results saved to {dev_results_path}")
+        model.load_model(feature_type)
 
-        print("Training final model on the entire training set...")
-        model.train(train_X, train_y, best_params)
-        print("Final model trained.")
+        evaluator = Evaluator(model.model, dev_X, dev_y, config)
+        evaluator.evaluate(feature_type, eval_type='dev')
 
-        model_filename = f'svm_model_{feature_type}.pkl'
-        model_path = os.path.join(config.model_save_dir, model_filename)
-        model.save_model()
-        print(f"Final model saved to {model_path}")
-
-        print("Evaluating final model on Test set")
         evaluator = Evaluator(model.model, test_X, test_y, config)
-        evaluator.evaluate(feature_type)
+        evaluator.evaluate(feature_type, eval_type='test')
 
 if __name__ == '__main__':
     main()
