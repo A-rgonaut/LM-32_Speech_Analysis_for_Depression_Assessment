@@ -1,7 +1,7 @@
 import os
 import joblib
 from sklearn.svm import SVC
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
@@ -12,7 +12,7 @@ class SVMModel:
     def __init__(self, config: SVMConfig):
         self.model = None
         self.config = config
-        self.kfold = StratifiedKFold(n_splits=self.config.k_folds, shuffle=True, random_state=self.config.seed)
+        self.kfold = StratifiedGroupKFold(n_splits=self.config.k_folds, shuffle=True, random_state=self.config.seed)
     
     def _create_pipeline(self, params=None):
         if params:
@@ -26,7 +26,7 @@ class SVMModel:
             ('svm', svm_instance)
         ])
 
-    def tune_and_train(self, X, y):
+    def tune_and_train(self, X, y, groups):
         pipeline = self._create_pipeline()
         
         grid = GridSearchCV(
@@ -44,7 +44,7 @@ class SVMModel:
             refit=True # Ensure the best model is refit on the entire dataset
         )
 
-        grid.fit(X, y)
+        grid.fit(X, y, groups=groups)
 
         print("Cross-Validation Results:")
         print("Best F1 score:", grid.best_score_)

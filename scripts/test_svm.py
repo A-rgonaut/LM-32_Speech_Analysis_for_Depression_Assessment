@@ -7,8 +7,8 @@ from src.svm_module.model import SVMModel
 from src.utils import set_seed
 
 def main():
-    set_seed(42)  
     config = SVMConfig()
+    set_seed(config.seed)  
     data_loader = DataLoader(config)
 
     feature_types_to_test = ['articulation', 'phonation', 'prosody', 'combined']
@@ -21,7 +21,7 @@ def main():
             all_train_X, all_dev_X, all_test_X = [], [], []
             train_y, dev_y, test_y = None, None, None
             for f_type in feature_list:
-                tr_X, tr_y, te_X, te_y, de_X, de_y = data_loader.load_data(f_type)
+                tr_X, tr_y, _, te_X, te_y, _, de_X, de_y, _ = data_loader.load_data(f_type)
                 all_train_X.append(np.array(tr_X))
                 all_dev_X.append(np.array(de_X))
                 all_test_X.append(np.array(te_X))
@@ -29,7 +29,7 @@ def main():
                     train_y, dev_y, test_y = np.array(tr_y), np.array(de_y), np.array(te_y)
             train_X, dev_X, test_X = np.hstack(all_train_X), np.hstack(all_dev_X), np.hstack(all_test_X)
         else:
-            train_X, train_y, test_X, test_y, dev_X, dev_y = data_loader.load_data(feature_type)
+            train_X, train_y, _, test_X, test_y, _, dev_X, dev_y, _ = data_loader.load_data(feature_type)
             train_X, train_y = np.array(train_X), np.array(train_y)
             dev_X, dev_y = np.array(dev_X), np.array(dev_y)
             test_X, test_y = np.array(test_X), np.array(test_y)

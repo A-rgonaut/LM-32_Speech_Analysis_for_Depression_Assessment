@@ -3,8 +3,6 @@ import torch
 import numpy as np
 import pandas as pd
 from typing import Tuple, List
-import os
-import glob
 from sklearn.metrics import confusion_matrix, accuracy_score, roc_auc_score, classification_report
 
 def clear_cache():
@@ -20,17 +18,6 @@ def set_seed(seed: int = 42):
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-
-def find_latest_model(model_dir, model_name):
-    type = 'pth'
-    if 'svm' in model_name:
-        type = 'pkl'
-    search_pattern = os.path.join(model_dir, f'{model_name}_*.{type}')
-    files = glob.glob(search_pattern)
-    if not files:
-        return None
-    latest_file = max(files, key=os.path.getctime)
-    return latest_file
 
 def filter_edaic_samples(splits: Tuple[pd.DataFrame, ...]) -> List[pd.DataFrame]:
     """Filters out augmented E-DAIC samples (ID >= 600) from a tuple of dataframes."""
@@ -57,7 +44,7 @@ def get_splits(splits : tuple):
 
     return train_paths, train_labels, test_paths, test_labels, dev_paths, dev_labels
 
-def get_metrics(y_true, y_pred, y_score=None, *args: str):
+def get_metrics(y_true, y_pred, *args: str, y_score=None):
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
     report = classification_report(y_true, y_pred, target_names=['No Depression', 'Depression'], output_dict=True, zero_division=0)
 

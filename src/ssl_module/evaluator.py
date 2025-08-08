@@ -2,45 +2,64 @@ import os
 import pandas as pd
 import torch
 from tqdm.auto import tqdm
-from sklearn.metrics import confusion_matrix, classification_report
 
-from ..src_utils import get_metrics
+from .model import SSLModel
+from .config import SSLConfig
+from ..utils import clear_cache, get_metrics
 
 class Evaluator:
-    def __init__(self, model, test_loader):
+    def __init__(self, test_loader, config: SSLConfig):
+        self.config = config
         self.test_loader = test_loader
-        self.results_file = 'results/ssl_evaluation_results.csv'
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = model.to(self.device)
 
-    def evaluate(self): 
-        self.model.eval()
-        predictions = []
-        targets = []
-        with torch.no_grad():
-            for batch in tqdm(self.test_loader):
-                inputs = batch['features'].to(self.device)
-                labels = batch['label'].to(self.device)
-                attention_mask = batch['attention_mask'].to(self.device)
-                outputs = self.model({'features': inputs, 'attention_mask': attention_mask})
-                preds = (torch.sigmoid(outputs.squeeze(1)) > 0.5).float()
-                predictions.extend(preds.cpu().numpy())
-                targets.extend(labels.cpu().numpy())
+    def evaluate(self, eval_type): 
+        all_metrics = [] 
+        for i in range(1, self.config.k_folds + 1):
+            path = os.path.join(self.config.model_save_dir, f'ssl_model_fold_{i}.pth')
+            model = SSLModel(self.config)
+            model.to(self.device)
+            model.eval()
+            model.load_state_dict(torch.load(path, map_location=self.device, weights_only=True))
 
-        metrics = get_metrics(targets, predictions)
-        print(confusion_matrix(targets, predictions))
-        print(classification_report(targets, predictions, target_names=['No Depression', 'Depression']))
-        print(f"Sensitivity: {metrics['sensitivity']:.4f}")
-        print(f"Specificity: {metrics['specificity']:.4f}")
+            predictions, targets, scores = [], [], []
+            with torch.no_grad():
+                for batch in tqdm(self.test_loader, desc=f"Evaluating {eval_type} set with model {i}"):
+                    batch = {k: v.to(self.device) for k, v in batch.items()}
+                    labels = batch['label']
+                    
+                    outputs = model(batch)
+                    scrs = torch.sigmoid(outputs)
+                    preds = (scrs > 0.5).float()
 
-        self.save_results(metrics)
+                    scores.extend(scrs.cpu().numpy())
+                    predictions.extend(preds.cpu().numpy())
+                    targets.extend(labels.cpu().numpy())
 
-    def save_results(self, data):
-        df = pd.DataFrame([data])
-        results_dir = os.path.dirname(self.results_file)
-        if results_dir and not os.path.exists(results_dir):
-            os.makedirs(results_dir, exist_ok=True)
-        if not os.path.exists(self.results_file):
-            df.to_csv(self.results_file, index=False)
-        else:
-            df.to_csv(self.results_file, mode='a', header=False, index=False)
+            metrics = get_metrics(targets, predictions, 'accuracy', 'f1_macro', 'roc_auc',
+                                    'sensitivity', 'specificity', y_score=scores)
+            all_metrics.append(metrics)
+            clear_cache()
+
+        df_metrics = pd.DataFrame(all_metrics)
+        mean_metrics = df_metrics.mean()
+        std_metrics = df_metrics.std()
+
+        print(f"Evaluation on {eval_type} set")
+        print("Mean Metrics across folds:")
+        print(mean_metrics)
+        print("\nStandard Deviation of Metrics across folds:")
+        print(std_metrics)
+        summary_df = pd.DataFrame({'mean': mean_metrics, 'std': std_metrics})
+
+        self.save_results(summary_df, eval_type)    
+
+    def save_results(self, metrics_data, eval_type):
+        if self.config.result_dir and not os.path.exists(self.config.result_dir):
+            os.makedirs(self.config.result_dir, exist_ok=True)
+
+        results_file = os.path.join(self.config.result_dir, f'{eval_type}_results.csv')
+        
+        metrics_data.index.name = 'Metric'
+        metrics_data.to_csv(results_file, index=True)
+        print(f"Results saved to {results_file}")

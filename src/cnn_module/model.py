@@ -1,4 +1,3 @@
-import torch
 from torch import nn
 
 from .config import CNNConfig
@@ -58,12 +57,9 @@ class CNNModel(nn.Module):
             elif "bias" in name:
                 nn.init.constant_(param, 0)
 
-    def forward(self, x):
-        if isinstance(x, dict):
-            x = x['input_values']
-
-        if not torch.is_floating_point(x):
-            x = x.float()
+    def forward(self, batch):
+        x = batch['input_values']
+        x = x.unsqueeze(1) # Add channel dimension -> (bs, 1, length)
 
         # conv blocks
         x = self.conv_block1(x)
@@ -74,4 +70,4 @@ class CNNModel(nn.Module):
         x_flattened = self.flatten(x)           
         output = self.mlp_block(x_flattened)    
 
-        return output
+        return output.squeeze(-1)  # (bs,)

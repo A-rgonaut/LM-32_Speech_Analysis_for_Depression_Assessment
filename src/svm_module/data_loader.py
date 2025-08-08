@@ -38,6 +38,7 @@ class DataLoader:
         self.__make_data()
         train_X, test_X, dev_X = [], [], []
         train_y, test_y, dev_y = [], [], []
+        train_groups, test_groups, dev_groups = [], [], []
 
         print(f"Loading {feature_type} features...")
         for split in self.splits:
@@ -45,7 +46,6 @@ class DataLoader:
 
             for _, row in tqdm(split.iterrows(), total=split.shape[0], desc=f"Loading {split_name} data for {feature_type}"):
                 participant_id = row['Participant_ID']
-                split = row['Split']
 
                 if not os.path.exists(interview_features := f'{self.config.e1_daic_path}{participant_id}_P/features/'):
                     print(f"Features for {participant_id} not found. Skipping...")
@@ -56,11 +56,14 @@ class DataLoader:
                 if split_name == 'train':
                     train_X.append(feature.flatten())
                     train_y.append(row['PHQ_Binary'])
+                    train_groups.append(participant_id)
                 elif split_name == 'test':
                     test_X.append(feature.flatten())
                     test_y.append(row['PHQ_Binary'])
+                    test_groups.append(participant_id)
                 elif split_name == 'dev':
                     dev_X.append(feature.flatten())
                     dev_y.append(row['PHQ_Binary'])
-        
-        return train_X, train_y, test_X, test_y, dev_X, dev_y
+                    dev_groups.append(participant_id)
+
+        return train_X, train_y, train_groups, test_X, test_y, test_groups, dev_X, dev_y, dev_groups

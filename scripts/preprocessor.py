@@ -1,5 +1,5 @@
 from src.preprocessor import E1_DAIC
-from src.src_utils import set_seed
+from src.utils import set_seed
 
 def main():
     set_seed(42)

@@ -11,19 +11,20 @@ def train_svm_for_feature(feature_type, config: SVMConfig, data_loader: DataLoad
     print(f"Training SVM for feature: {feature_type}")
     
     if feature_type == 'combined':
-        all_train_X, train_y = [], None
+        all_train_X, train_y, train_groups = [], None, []
         for f_type in ['articulation', 'phonation', 'prosody']:
-            tr_X, tr_y, *_ = data_loader.load_data(f_type)
+            tr_X, tr_y, tr_groups, *_ = data_loader.load_data(f_type)
             all_train_X.append(np.array(tr_X))
             if train_y is None:
                 train_y = np.array(tr_y)
+                train_groups = np.array(tr_groups)
         train_X = np.hstack(all_train_X)
     else:
-        train_X, train_y, *_ = data_loader.load_data(feature_type)
-        train_X, train_y = np.array(train_X), np.array(train_y)
-    
+        train_X, train_y, train_groups, *_ = data_loader.load_data(feature_type)
+        train_X, train_y, train_groups = np.array(train_X), np.array(train_y), np.array(train_groups)
+
     model = SVMModel(config)
-    best_params = model.tune_and_train(train_X, train_y)
+    best_params = model.tune_and_train(train_X, train_y, train_groups)
 
     params_path = os.path.join(config.model_save_dir, f'svm_params_{feature_type}.json')
     os.makedirs(config.model_save_dir, exist_ok=True)
@@ -37,8 +38,8 @@ def train_svm_for_feature(feature_type, config: SVMConfig, data_loader: DataLoad
     clear_cache()
 
 def main():
-    set_seed(42)
     config = SVMConfig()
+    set_seed(config.seed)
     data_loader = DataLoader(config)
 
     for feature_type in ['articulation', 'phonation', 'prosody', 'combined']:

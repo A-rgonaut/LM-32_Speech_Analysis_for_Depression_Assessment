@@ -8,36 +8,33 @@ def segment_audio_by_transcript(
     sample_rate, 
     max_utt_seconds, 
     min_utt_seconds,
-    overlap_seconds
+    overlap_seconds,
+    fullness_threshold=0.8,
+    return_indices=False,
 ):
     """
-    Segments audio based on a transcript, grouping utterances and intelligently
-    handling very long utterances.
-
-    Args:
-        audio (np.array): The complete audio array.
-        transcript_df (pd.DataFrame): DataFrame with 'Start_Time' and 'End_Time' columns.
-        sample_rate (int): The audio's sample rate.
-        max_utt_seconds (float): The maximum desired duration for a segment in seconds.
-        min_utt_seconds (float): The minimum duration for the final segment to be kept.
-        overlap_seconds (float): The duration of the overlap in seconds when a long
-                                 utterance is split into multiple chunks.
+    Segments audio based on a transcript.
+    Can return either audio segments or their start/end sample indices.
     """
     max_samples = int(max_utt_seconds * sample_rate)
     min_samples = int(min_utt_seconds * sample_rate)
     overlap_samples = int(overlap_seconds * sample_rate)
     step = max_samples - overlap_samples
-    fullness_threshold = int(0.8 * max_samples)
+    fullness_threshold = int(fullness_threshold * max_samples)
 
     segments = []
     current_utterances_audio = []
     current_duration_samples = 0
+    current_segment_start_sample = None
 
-    for _, row in transcript_df.iterrows():
+    for i, row in transcript_df.iterrows():
         start_sample = int(row['Start_Time'] * sample_rate)
         end_sample = int(row['End_Time'] * sample_rate)
         utterance_audio = audio[start_sample:end_sample]
         utterance_samples = len(utterance_audio)
+
+        if not current_utterances_audio:
+            current_segment_start_sample = start_sample
         
         # If the utterance fits perfectly in the remaining space of the buffer
         if current_duration_samples + utterance_samples <= max_samples:
@@ -48,11 +45,16 @@ def segment_audio_by_transcript(
             audio_to_chunk = None 
             if current_duration_samples >= fullness_threshold:
                 # The current buffer is "full enough".
-                full_segment = np.concatenate(current_utterances_audio)
-                segments.append(full_segment)
+                if return_indices:
+                    segment_end_sample = current_segment_start_sample + current_duration_samples
+                    segments.append((current_segment_start_sample, segment_end_sample))
+                else:
+                    full_segment = np.concatenate(current_utterances_audio)
+                    segments.append(full_segment)
                 
                 # The entire new utterance will be chunked.
                 audio_to_chunk = utterance_audio
+                current_segment_start_sample = start_sample
             else:
                 # Fill the remaining space in the buffer.
                 space_left = max_samples - current_duration_samples
@@ -60,11 +62,16 @@ def segment_audio_by_transcript(
                 current_utterances_audio.append(part_to_fill)
 
                 # Finalize and save the now-full segment.
-                full_segment = np.concatenate(current_utterances_audio)
-                segments.append(full_segment)
+                if return_indices:
+                    segment_end_sample = current_segment_start_sample + max_samples
+                    segments.append((current_segment_start_sample, segment_end_sample))
+                else:
+                    full_segment = np.concatenate(current_utterances_audio)
+                    segments.append(full_segment)
                 
                 # The remainder of the new utterance will be chunked.
                 audio_to_chunk = utterance_audio[space_left:]
+                current_segment_start_sample = start_sample + space_left
 
             current_utterances_audio = []
             current_duration_samples = 0
@@ -75,7 +82,12 @@ def segment_audio_by_transcript(
                     chunk = audio_to_chunk[idx : idx + max_samples]
                     
                     if len(chunk) == max_samples:
-                        segments.append(chunk)
+                        if return_indices:
+                            chunk_start = current_segment_start_sample + idx
+                            chunk_end = chunk_start + len(chunk)
+                            segments.append((chunk_start, chunk_end))
+                        else:
+                            segments.append(chunk)
                         idx += step 
                     else:
                         # This is the last, shorter chunk. It becomes the new buffer.
@@ -85,10 +97,14 @@ def segment_audio_by_transcript(
                         break
 
     if current_utterances_audio:
-        last_segment = np.concatenate(current_utterances_audio)
         # Only add the last segment if it meets the minimum duration requirement.
-        if len(last_segment) >= min_samples:
-            segments.append(last_segment)
+        if current_duration_samples >= min_samples:
+            if return_indices:
+                segment_end_sample = current_segment_start_sample + current_duration_samples
+                segments.append((current_segment_start_sample, segment_end_sample))
+            else:
+                last_segment = np.concatenate(current_utterances_audio)
+                segments.append(last_segment)
             
     return segments
 
@@ -97,20 +113,12 @@ def segment_audio_sliding_window(
     sample_rate, 
     max_utt_seconds, 
     min_utt_seconds,
-    overlap_seconds
+    overlap_seconds,
+    return_indices=False
 ):
     """
-    Segmenta l'audio in blocchi di lunghezza fissa usando una finestra scorrevole (con sovrapposizione).
-
-    Args:
-        audio (np.array): L'array audio da segmentare.
-        sample_rate (int): La frequenza di campionamento dell'audio.
-        max_utt_seconds (float): La durata di ogni segmento (la "lunghezza della finestra").
-        overlap_seconds (float): La durata della sovrapposizione tra segmenti consecutivi.
-        min_utt_seconds (float): La durata minima dell'ultimo segmento per essere incluso.
-    
-    Returns:
-        list[np.array]: Una lista di segmenti audio.
+    Segments audio using a sliding window approach.
+    Can return either audio segments or their start/end sample indices.
     """
     segment_samples = int(max_utt_seconds * sample_rate)
     overlap_samples = int(overlap_seconds * sample_rate)
@@ -120,8 +128,13 @@ def segment_audio_sliding_window(
     segments = []
     
     for i in range(0, len(audio), step):
-        segment = audio[i:i + segment_samples]
-        segments.append(segment)
+        start_sample = i
+        end_sample = start_sample + segment_samples
+        segment = audio[start_sample:end_sample]
+        if return_indices:
+            segments.append((start_sample, start_sample + len(segment)))
+        else:
+            segments.append(segment)
 
     if segments and len(segments[-1]) < min_samples:
         segments.pop()
