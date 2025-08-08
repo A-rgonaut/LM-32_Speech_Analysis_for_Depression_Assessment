@@ -1,85 +1,104 @@
 import os
 import torch
-import numpy as np
 import pandas as pd
+import librosa
 from torch.utils.data import Dataset as TorchDataset, DataLoader as TorchDataLoader
-from tqdm import tqdm
 from transformers import AutoFeatureExtractor
 
 from .config import SSLConfig
+from .sampler import BalancedParticipantSampler
 from ..utils import get_splits, filter_edaic_samples
 from ..audio_utils import load_audio, segment_audio_by_transcript, segment_audio_sliding_window
 from ..preprocessor import E1_DAIC
 
 class Dataset(TorchDataset):
-    def __init__(self, audio_paths : str, labels : str, config : SSLConfig = SSLConfig(), 
-                 subdialogue_windows: list = None, is_train: bool = False):
+    def __init__(self, config : SSLConfig, participant_info: dict, is_train: bool = False):
         self.config = config
-        self.audio_paths = audio_paths
-        self.labels = labels
-        self.subdialogue_windows = subdialogue_windows
+        self.participant_info = participant_info
+        self.is_train = is_train
+
         if not config.use_preextracted_features:
             self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name, do_normalize=False)
-        self.sample_rate = config.sample_rate
-        self.segment_samples = int(config.max_utt_seconds * config.sample_rate)
-        self.max_segments = config.max_segments if is_train else None
-        self.path_to_id = {path: os.path.basename(path).replace('_AUDIO.wav', '') for path in audio_paths}
+
+        # Crea una lista di "item" che il dataset può restituire.
+        # Ogni item è un chunk.
+        self.indexable_items = []
+        if self.is_train:
+            # In training, il sampler lavora con gli ID, quindi la lista è solo di ID.
+            self.indexable_items = list(self.participant_info.keys())
+        else:
+            # In eval, creiamo una lista di tutti i chunk possibili in modo deterministico.
+            for pid, info in self.participant_info.items():
+                total_segments = info['total_segments']
+                chunk_size = self.config.chunk_segments
+                
+                # Usiamo uno step uguale a chunk_size per chunk non sovrapposti
+                for start_idx in range(0, total_segments, chunk_size):
+                    self.indexable_items.append({'participant_id': pid, 'start_index': start_idx})
 
     def __len__(self):
-        return len(self.audio_paths)
+        return len(self.indexable_items)
 
     def __getitem__(self, idx):
-        audio_path = self.audio_paths[idx]
-        label = self.labels[idx]
+        if self.is_train:
+            # --- TRAINING ---
+            # 'idx' qui è un dizionario dal sampler {'id':..., 'start':...}
+            participant_id = idx['participant_id']
+            start_index = idx['start_index']
+        else:
+            # --- EVALUATION ---
+            # 'idx' è un intero. Prendiamo l'istruzione dalla nostra lista di chunk
+            item_info = self.indexable_items[idx]
+            participant_id = item_info['participant_id']
+            start_index = item_info['start_index']
+
+        participant_data = self.participant_info[participant_id]
+        label = torch.tensor(participant_data['label'], dtype=torch.float32)
+        audio_id = torch.tensor(int(participant_id), dtype=torch.long)
+        chunk_size = self.config.chunk_segments
+        end_index = start_index + chunk_size
 
         if self.config.use_preextracted_features:
-            feature_filename = os.path.basename(audio_path).split('.')[0]  # Remove file extension
-            feature_path = os.path.join(self.config.feature_path, f'{feature_filename}_layer_{self.config.layer_to_use}.pt')
+            feature_filename = f"{participant_id}_AUDIO_layer_{self.config.layer_to_use}.pt"
+            feature_path = os.path.join(self.config.feature_path, feature_filename)
+            all_features = torch.load(feature_path, map_location='cpu', weights_only=True)
+            feature_chunk = all_features[start_index:end_index]
 
-            segment_features = torch.load(feature_path, map_location='cpu', weights_only=True) 
+            # Padding se l'ultimo chunk è più corto
+            actual_len = feature_chunk.shape[0]
+            if actual_len < chunk_size:
+                padding_size = chunk_size - actual_len
+                padding = torch.zeros((padding_size, feature_chunk.shape[1]), dtype=feature_chunk.dtype)
+                feature_chunk = torch.cat([feature_chunk, padding], dim=0)
 
-            if self.subdialogue_windows is not None:
-                start_idx, end_idx = self.subdialogue_windows[idx]
-                segment_features = segment_features[start_idx:end_idx]
-
-            num_segments = segment_features.shape[0]
-
-            if self.max_segments and num_segments > self.max_segments:
-                segment_features = segment_features[:self.max_segments]
-                num_segments = self.max_segments
-            
             return {
-                'segment_features': segment_features, # (num_segments, hidden_size)
-                'label': torch.tensor(label, dtype=torch.float32),
-                'num_segments': num_segments
+                'segment_features': feature_chunk, # (chunk_size, feature_dim)
+                'label': label,
+                'audio_id': audio_id
             }
         else:
+            audio_path = participant_data['path']
             audio = load_audio(audio_path, self.sample_rate)
 
             segments = []
             if self.config.segmentation_strategy == 'transcript':
                 transcript_path = audio_path.replace("_AUDIO.wav", "_Transcript.csv")
                 transcript_df = pd.read_csv(transcript_path)
-                segments = segment_audio_by_transcript(audio, transcript_df)
+                segments = segment_audio_by_transcript(audio, transcript_df, self.config.sample_rate, self.config.max_utt_seconds, 
+                self.config.min_utt_seconds, self.config.overlap_seconds)
             else: # 'fixed_length'
-                segments = segment_audio_sliding_window(audio)
-            
-            if self.subdialogue_windows is not None:
-                start_idx, end_idx = self.subdialogue_windows[idx]
-                segments = segments[start_idx:end_idx]
-
-            # Limit the number of segments if specified
-            if self.max_segments and len(segments) > self.max_segments:
-                segments = segments[:self.max_segments]
+                segments = segment_audio_sliding_window(audio, self.config.sample_rate, self.config.max_utt_seconds,
+                self.config.min_utt_seconds, self.config.overlap_seconds)
 
             all_input_values = []
             all_attention_masks = []
+            segment_samples = int(self.config.max_utt_seconds * self.config.sample_rate)
             
             for segment in segments:
                 features = self.feature_extractor(
                     segment, 
-                    sampling_rate=self.sample_rate,
-                    max_length=self.segment_samples,
+                    sampling_rate=self.config.sample_rate,
+                    max_length=segment_samples,
                     padding='max_length',
                     truncation=True,
                     return_tensors='pt',
@@ -91,178 +110,153 @@ class Dataset(TorchDataset):
             
             stacked_input_values = torch.stack(all_input_values)
             stacked_attention_masks = torch.stack(all_attention_masks)
-            
+
+            chunk_input_values = stacked_input_values[start_index:end_index]
+            chunk_attention_masks = stacked_attention_masks[start_index:end_index]
+
+            actual_len = chunk_input_values.shape[0]
+            chunk_size = self.config.chunk_segments
+            if actual_len < chunk_size:
+                padding_size = chunk_size - actual_len
+                
+                # Padding per input_values
+                padding_values = torch.zeros((padding_size, chunk_input_values.shape[1]), dtype=chunk_input_values.dtype)
+                chunk_input_values = torch.cat([chunk_input_values, padding_values], dim=0)
+                
+                # Padding per le maschere
+                padding_masks = torch.zeros((padding_size, chunk_attention_masks.shape[1]), dtype=chunk_attention_masks.dtype)
+                chunk_attention_masks = torch.cat([chunk_attention_masks, padding_masks], dim=0)
+
             return {
-                'input_values': stacked_input_values,  # (num_segments, seq_len)
-                'attention_mask_segment': stacked_attention_masks,  # (num_segments,)
-                'label': torch.tensor(label, dtype=torch.float32),
-                'num_segments': len(segments)
+                'input_values': chunk_input_values,  # (chunk_size, seq_len)
+                'attention_mask_segment': chunk_attention_masks,  # (chunk_size,)
+                'label': label,
+                'audio_id': audio_id,
             }
 
 def collate_fn(batch):
     """
-    This function is used because different audio files can have a different number of segments.
-    For example:
-    - Audio 1: 30 seconds → 3 segments of 10s
-    - Audio 2: 50 seconds → 5 segments of 10s
-
-    To create a uniform batch, we need to pad to the maximum number of segments.
+    Collate function per la nuova logica a chunk.
+    Il batch è una lista di dizionari, ognuno contenente un chunk.
     """
-    # Find the maximum number of segments in the batch
-    max_segments = max([item['num_segments'] for item in batch])
-    
-    batch_features = []
-    batch_input_values = []
-    batch_labels = []
-    batch_audio_masks = []
-    batch_segment_masks = []
-
-    is_preextracted = 'segment_features' in batch[0]
-    
-    for item in batch:
-        num_segments = item['num_segments']
-
-        # Audio-level mask (for padding entire segments)
-        audio_mask = torch.zeros(max_segments, dtype=torch.bool)
-        audio_mask[num_segments:] = True # True where segments are padding
+    labels = torch.stack([item['label'] for item in batch])
+    audio_ids = torch.stack([item['audio_id'] for item in batch])
+    if 'segment_features' in batch[0]:
+        features = torch.stack([item['segment_features'] for item in batch])
         
-        batch_audio_masks.append(audio_mask)
-        batch_labels.append(item['label'])
-
-        # Pad if necessary
-        if num_segments < max_segments:
-            if is_preextracted:
-                # Pad pre-extracted features
-                features = item['segment_features']
-                padding_shape = (max_segments - num_segments, features.shape[1])
-                padding = torch.zeros(padding_shape, dtype=features.dtype)
-                padded_features = torch.cat([features, padding], dim=0)
-                batch_features.append(padded_features)
-            else:
-                # Pad input_values
-                input_values = item['input_values']
-                padding_shape_values = (max_segments - num_segments, input_values.shape[1])
-                padding_values = torch.zeros(padding_shape_values, dtype=input_values.dtype)
-                input_values = torch.cat([input_values, padding_values], dim=0)
-                
-                # Pad segment-level attention mask
-                attention_mask_segment = item['attention_mask_segment']
-                padding_shape_mask = (max_segments - num_segments, attention_mask_segment.shape[1])
-                padding_mask = torch.zeros(padding_shape_mask, dtype=attention_mask_segment.dtype)
-                attention_mask_segment = torch.cat([attention_mask_segment, padding_mask], dim=0)
-                
-                batch_input_values.append(input_values)
-                batch_segment_masks.append(attention_mask_segment)
-        else:
-            if is_preextracted:
-                batch_features.append(item['segment_features'])
-            else:
-                batch_input_values.append(item['input_values'])
-                batch_segment_masks.append(item['attention_mask_segment'])
-    
-    if is_preextracted:
         return {
-            'segment_features': torch.stack(batch_features),
-            'attention_mask_audio': torch.stack(batch_audio_masks),
-            'label': torch.stack(batch_labels)
+            'segment_features': features,
+            'label': labels,
+            'audio_id': audio_ids
         }
     else:
+        input_values = torch.stack([item['input_values'] for item in batch])
+        attention_masks = torch.stack([item['attention_mask_segment'] for item in batch])
+        
         return {
-            'input_values': torch.stack(batch_input_values),
-            'attention_mask_segment': torch.stack(batch_segment_masks),
-            'attention_mask_audio': torch.stack(batch_audio_masks),
-            'label': torch.stack(batch_labels)
+            'input_values': input_values,
+            'attention_mask_segment': attention_masks,
+            'label': labels,
+            'audio_id': audio_ids
         }
 
 class DataLoader():
     def __init__(self, config : SSLConfig = SSLConfig()):
         self.config = config
-        self.batch_size = config.batch_size
         self.preprocessor = E1_DAIC(config.daic_path, config.e_daic_path, config.e1_daic_path)
-        self.splits = self.preprocessor.get_dataset_splits()
+        self.splits_df = self.preprocessor.get_dataset_splits()
         if not self.config.edaic_aug:
-            self.splits = filter_edaic_samples(self.splits)
-        self._load_metadata()
+            self.splits_df = filter_edaic_samples(self.splits_df)
+        self._setup_participant_info()
 
-    def _load_metadata(self):
-        self.metadata = {}
-        metadata_dir = self.config.feature_path
-        print(f"Loading metadata from: {metadata_dir}")
+    def _get_num_segments(self, audio_path):
+        audio, _ = librosa.load(audio_path, sr=self.config.sample_rate)
+        if self.config.segmentation_strategy == 'transcript':
+            transcript_path = audio_path.replace('_AUDIO.wav', '_Transcript.csv')
+            transcript_df = pd.read_csv(transcript_path)
+            indices = segment_audio_by_transcript(audio, transcript_df, self.config.sample_rate, self.config.max_utt_seconds, 
+                self.config.min_utt_seconds, self.config.overlap_seconds, return_indices=True)
+        else: # 'fixed_length'
+            indices = segment_audio_sliding_window(audio, self.config.sample_rate, self.config.max_utt_seconds,
+            self.config.min_utt_seconds, self.config.overlap_seconds, return_indices=True)
 
-        for split in ['train', 'dev', 'test']:
-            metadata_path = os.path.join(metadata_dir, f'{split}_metadata.csv')
-            if os.path.exists(metadata_path):
-                df = pd.read_csv(metadata_path)
-                self.metadata.update(pd.Series(df.num_segments.values, index=df.filename).to_dict())
+        return len(indices)
 
-    def _apply_subdialogue_shuffling(self, original_paths, original_labels):
-        print("Applying sub-dialogue shuffling for data augmentation...")
+    def _setup_participant_info(self):
+        self.participant_info = {}
+        train_paths, train_labels, test_paths, test_labels, dev_paths, dev_labels = get_splits(self.splits_df)
+        all_paths = train_paths + dev_paths + test_paths
+        all_labels = train_labels + dev_labels + test_labels
+        path_to_label = {path: label for path, label in zip(all_paths, all_labels)}
+
+        print("Configuring participant metadata...")
+        _metadata_df_map = {}
+        if self.config.use_preextracted_features:
+            for split in ['train', 'dev', 'test']:
+                metadata_csv_path = os.path.join(self.config.feature_path, f'{split}_metadata.csv')
+                if os.path.exists(metadata_csv_path):
+                    df = pd.read_csv(metadata_csv_path)
+                    for _, row in df.iterrows():
+                        _metadata_df_map[row['filename']] = row['num_segments']
         
-        # Algoritmo 1: Passi 1-4
-        N_pos = sum(1 for label in original_labels if label == 1)
-        N_neg = len(original_labels) - N_pos
-        M_pos = self.config.subdialogue_M_pos
-        M_neg = round(N_pos * M_pos / N_neg) if N_neg > 0 else 0
-        
-        el = self.config.subdialogue_len_low
-        eh = self.config.subdialogue_len_high
+        for path in all_paths:
+            participant_id = int(os.path.basename(path).replace('_AUDIO.wav', ''))
+            num_segments = 0
+            if self.config.use_preextracted_features:
+                feature_filename = os.path.basename(path).replace('.wav', '.pt')
+                num_segments = _metadata_df_map.get(feature_filename, 0)
+            else:
+                num_segments = self._get_num_segments(path)
 
-        new_paths, new_labels, new_windows = [], [], []
-        path_to_label = {path: label for path, label in zip(original_paths, original_labels)}
-        
-        # Algoritmo 1: Passi 6-17
-        for path in tqdm(path_to_label.keys(), desc="Generating Sub-dialogues"):
-            label = path_to_label[path]
-            filename = os.path.basename(path).replace('.wav', '.pt')
-            
-            total_segments = self.metadata[filename]
-            if total_segments < 2:
-                continue
-
-            M = M_pos if label == 1 else M_neg
-            
-            for _ in range(M):
-                e_len_fraction = np.random.uniform(el, eh)
-                num_sub_segments = int(e_len_fraction * total_segments)
-
-                if total_segments - num_sub_segments <= 0:
-                    start_segment_idx = 0
-                else:
-                    start_segment_idx = np.random.randint(0, total_segments - num_sub_segments + 1)
-                
-                end_segment_idx = start_segment_idx + num_sub_segments
-                
-                new_paths.append(path)
-                new_labels.append(label)
-                new_windows.append((start_segment_idx, end_segment_idx))
-
-        print(f"Augmentation complete. Original samples: {len(original_paths)}, New samples: {len(new_paths)}")
-        return new_paths, new_labels, new_windows
+            self.participant_info[participant_id] = {
+                'path': path, 'label': path_to_label.get(path, -1), 'total_segments': num_segments
+            }
 
     def get_dataset(self, split: str):
-        train_paths, train_labels, test_paths, test_labels, dev_paths, dev_labels = get_splits(self.splits)
-        aug_train_windows = None
-        if self.config.use_subdialogue_shuffling and split == 'train':
-            train_paths, train_labels, aug_train_windows = self._apply_subdialogue_shuffling(train_paths, train_labels)
+        train_df, test_df, dev_df = self.splits_df
 
         if split == 'train':
-            dataset = Dataset(audio_paths=train_paths, labels=train_labels, config=self.config, subdialogue_windows=aug_train_windows)
+            target_df = train_df
         elif split == 'dev':
-            dataset = Dataset(audio_paths=dev_paths, labels=dev_labels, config=self.config)
-        elif split == 'test':
-            dataset = Dataset(audio_paths=test_paths, labels=test_labels, config=self.config)
-        
-        return dataset
+            target_df = dev_df
+        else:
+            target_df = test_df
+
+        participant_ids_for_split = [row["Participant_ID"] for _, row in target_df.iterrows()]
+
+        split_participant_info = {
+            pid: self.participant_info[pid] 
+            for pid in participant_ids_for_split
+            if pid in self.participant_info
+        }
+
+        return Dataset(
+            config=self.config, 
+            participant_info=split_participant_info, 
+            is_train=(split == 'train')
+        )
 
     def get_data_loader(self, split: str, dataset: TorchDataset = None):
         if dataset is None:
             dataset = self.get_dataset(split)
-            
-        return TorchDataLoader(
-            dataset, 
-            batch_size=self.batch_size,
-            shuffle=True if split == 'train' else False,
-            num_workers=os.cpu_count(),
-            collate_fn=collate_fn,
-            pin_memory=True
-        )
+
+        is_train = split == 'train'
+        
+        if is_train and self.config.use_random_chunking:
+            sampler = BalancedParticipantSampler(dataset, self.config.batch_size, self.config.chunk_segments)
+            return TorchDataLoader(
+                dataset,
+                batch_sampler=sampler,
+                num_workers=os.cpu_count(),
+                collate_fn=collate_fn,
+                pin_memory=True
+            )
+        else:
+            return TorchDataLoader(
+                dataset, 
+                batch_size=self.config.batch_size,
+                shuffle=False,
+                num_workers=os.cpu_count(),
+                collate_fn=collate_fn,
+                pin_memory=True
+            )

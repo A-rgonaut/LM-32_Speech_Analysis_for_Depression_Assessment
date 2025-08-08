@@ -53,7 +53,8 @@ class SSLModel(nn.Module):
                 )
                 self.layer_norms.requires_grad = True
                 self.softmax = nn.Softmax(dim=-1)
-                self.segment_embeddings_pooling = AttentionPoolingLayer(embed_dim=self.ssl_hidden_size)
+                
+            self.segment_embeddings_pooling = AttentionPoolingLayer(embed_dim=self.ssl_hidden_size)
 
         ssl_config = AutoConfig.from_pretrained(config.model_name)
         self.ssl_hidden_size = ssl_config.hidden_size
@@ -83,7 +84,6 @@ class SSLModel(nn.Module):
             #self.audio_embedding_pooling = AttentionPoolingLayer(embed_dim=self.seq_output_dim)
             self.audio_embedding_pooling = MeanPoolingLayer()
 
-
         self.audio_embedding_dim = self.seq_output_dim
 
         self.classifier = nn.Sequential(
@@ -100,8 +100,6 @@ class SSLModel(nn.Module):
                 nn.init.constant_(param, 0)
 
     def forward(self, batch):
-        attention_mask_audio = batch['attention_mask_audio'] # (bs, num_segments)
-        batch_size, num_segments = attention_mask_audio.shape
         frame_mask = None 
 
         if self.use_preextracted_features:
@@ -109,6 +107,7 @@ class SSLModel(nn.Module):
         else:
             input_values = batch['input_values'] # (bs, num_segments, seq_len)
             attention_mask_segment = batch['attention_mask_segment'] # (bs, num_segments, seq_len)
+            batch_size, num_segments = input_values.shape[:2]
 
             attention_mask_segment_flat = attention_mask_segment.view(batch_size * num_segments, -1) # (bs * num_segments, seq_len)
 
@@ -150,9 +149,9 @@ class SSLModel(nn.Module):
         # Sequence modeling across segments
         # Process the sequence of segment embeddings for each audio file.
         if self.seq_model_type == 'transformer':
-            sequence_output = self.sequence_model(projected_embeddings, src_key_padding_mask=attention_mask_audio)
+            sequence_output = self.sequence_model(projected_embeddings)
             # Pool segment-level outputs to get a single audio-level representation
-            audio_embeddings = self.audio_embedding_pooling(sequence_output, mask=attention_mask_audio)  # (bs, audio_embedding_dim)
+            audio_embeddings = self.audio_embedding_pooling(sequence_output)  # (bs, audio_embedding_dim)
 
         logits = self.classifier(audio_embeddings)  # (bs, 1)
 

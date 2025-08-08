@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+import numpy as np
 import os
 from transformers import get_linear_schedule_with_warmup
 
@@ -55,29 +56,54 @@ class Trainer():
 
         avg_loss = tot_loss / len(self.train_loader)
         return avg_loss
-
+    
     def validate_epoch(self):
         self.model.eval()
 
         total_loss = 0
-        predictions, targets = [], []
-    
-        with torch.no_grad():
-            for batch in tqdm(self.val_loader):
-                batch = {k: v.to(self.device) for k, v in batch.items()}
-                labels = batch['label']
-                outputs = self.model(batch)
+        session_targets = {}
+        session_scores = {}
 
+        with torch.no_grad():
+            for batch in tqdm(self.val_loader, desc="Validating Epoch"):
+                batch = {k: v.to(self.device) for k, v in batch.items()}
+                audio_ids = batch.pop('audio_id')
+                labels = batch['label']
+
+                outputs = self.model(batch)
                 loss = self.criterion(outputs, labels)
                 total_loss += loss.item()
+                scores = torch.sigmoid(outputs)
 
-                preds = (torch.sigmoid(outputs) > 0.5).float()
+                for idx in range(len(audio_ids)):
+                    session_id = audio_ids[idx].item()
+                    score = scores[idx].item()
+                    target = labels[idx].item()
 
-                predictions.extend(preds.cpu().numpy())
-                targets.extend(labels.cpu().numpy())
+                    if session_id not in session_scores:
+                        session_scores[session_id] = []
+                    
+                    session_scores[session_id].append(score)
+                    session_targets[session_id] = target
+
+        final_predictions, final_targets, final_scores = [], [], []
+        
+        for session_id in session_scores:
+            if self.config.eval_strategy == 'average':
+                avg_score = np.mean(session_scores[session_id])
+                predicted_label = 1 if avg_score > 0.5 else 0
+                final_scores.append(avg_score)
+            elif self.config.eval_strategy == 'majority':
+                segment_predictions = [1 if score > 0.5 else 0 for score in session_scores[session_id]]
+                predicted_label = max(set(segment_predictions), key=segment_predictions.count)
+                final_scores.append(np.mean(session_scores[session_id]))
+
+            final_predictions.append(predicted_label)
+            final_targets.append(session_targets[session_id])
 
         avg_loss = total_loss / len(self.val_loader)
-        metrics = get_metrics(targets, predictions, 'f1_macro', 'f1_depression', 'accuracy')
+        
+        metrics = get_metrics(final_targets, final_predictions, 'f1_macro', 'f1_depression', 'accuracy', y_score=final_scores)
 
         return avg_loss, metrics['accuracy'], metrics['f1_macro'], metrics['f1_depression']
 

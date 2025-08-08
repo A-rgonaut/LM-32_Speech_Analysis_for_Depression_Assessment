@@ -1,7 +1,8 @@
 import os
 import pandas as pd
 import torch
-from tqdm.auto import tqdm
+import numpy as np
+from tqdm import tqdm
 
 from .model import SSLModel
 from .config import SSLConfig
@@ -13,34 +14,58 @@ class Evaluator:
         self.test_loader = test_loader
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    def evaluate(self, eval_type): 
+    def evaluate(self, eval_type):
         all_metrics = [] 
         for i in range(1, self.config.k_folds + 1):
             path = os.path.join(self.config.model_save_dir, f'ssl_model_fold_{i}.pth')
             model = SSLModel(self.config)
+            model.load_state_dict(torch.load(path, map_location=self.device, weights_only=True))
             model.to(self.device)
             model.eval()
-            model.load_state_dict(torch.load(path, map_location=self.device, weights_only=True))
 
-            predictions, targets, scores = [], [], []
+            session_scores, session_targets = {}, {}
             with torch.no_grad():
                 for batch in tqdm(self.test_loader, desc=f"Evaluating {eval_type} set with model {i}"):
                     batch = {k: v.to(self.device) for k, v in batch.items()}
-                    labels = batch['label']
-                    
+                    audio_ids = batch.pop('audio_id')
+                    labels = batch['label']    
+                
                     outputs = model(batch)
-                    scrs = torch.sigmoid(outputs)
-                    preds = (scrs > 0.5).float()
+                    scores = torch.sigmoid(outputs)
+                
+                    for idx in range(len(audio_ids)):
+                        session_id = audio_ids[idx].item()
+                        score = scores[idx].item()
+                        target = labels[idx].item()
 
-                    scores.extend(scrs.cpu().numpy())
-                    predictions.extend(preds.cpu().numpy())
-                    targets.extend(labels.cpu().numpy())
+                        if session_id not in session_scores:
+                            session_scores[session_id] = []
 
-            metrics = get_metrics(targets, predictions, 'accuracy', 'f1_macro', 'roc_auc',
-                                    'sensitivity', 'specificity', y_score=scores)
+                        session_scores[session_id].append(score)
+                        session_targets[session_id] = target
+
+            final_predictions = []
+            final_targets = []
+            final_scores = []
+
+            for session_id in session_scores:
+                if self.config.eval_strategy == 'average':
+                    avg_score = np.mean(session_scores[session_id])
+                    predicted_label = 1 if avg_score > 0.5 else 0
+                    final_scores.append(avg_score)
+                elif self.config.eval_strategy == 'majority':
+                    segment_predictions = [1 if score > 0.5 else 0 for score in session_scores[session_id]]
+                    predicted_label = max(set(segment_predictions), key=segment_predictions.count)
+                    final_scores.append(np.mean(session_scores[session_id]))
+
+                final_predictions.append(predicted_label)
+                final_targets.append(session_targets[session_id])
+
+            metrics = get_metrics(final_targets, final_predictions, 'accuracy', 'f1_macro', 'roc_auc',
+                                'sensitivity', 'specificity', y_score=final_scores)
             all_metrics.append(metrics)
             clear_cache()
-
+        
         df_metrics = pd.DataFrame(all_metrics)
         mean_metrics = df_metrics.mean()
         std_metrics = df_metrics.std()

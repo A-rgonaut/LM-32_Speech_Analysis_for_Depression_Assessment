@@ -2,11 +2,10 @@ import os
 from dotenv import load_dotenv
 from comet_ml import Experiment
 import numpy as np
-from torch.utils.data import Subset
 from sklearn.model_selection import StratifiedGroupKFold, GroupShuffleSplit
 
 from src.ssl_module.config import SSLConfig
-from src.ssl_module.data_loader import DataLoader
+from src.ssl_module.data_loader import DataLoader, Dataset
 from src.ssl_module.model import SSLModel
 from src.ssl_module.trainer import Trainer
 from src.utils import set_seed, clear_cache
@@ -23,25 +22,32 @@ def main():
     set_seed(config.seed)
 
     data_loader = DataLoader(config)
-    train_dataset = data_loader.get_dataset('train')
 
-    indices = np.arange(len(train_dataset))
-    labels = train_dataset.labels
-    groups = [train_dataset.path_to_id[p] for p in train_dataset.audio_paths]
+    train_val_df, _, _ = data_loader.splits_df
+    
+    participant_ids = train_val_df["Participant_ID"].tolist()
+    labels = train_val_df['PHQ_Binary'].tolist()
+    groups = participant_ids
 
     if config.k_folds == 1:
         kfold = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=config.seed)
     else:
         kfold = StratifiedGroupKFold(n_splits=config.k_folds, shuffle=True, random_state=config.seed)
 
-    for fold, (train_idx, val_idx) in enumerate(kfold.split(indices, labels, groups)):
+    for fold, (train_idx, val_idx) in enumerate(kfold.split(participant_ids, labels, groups)):
         print(f"\nTraining Fold {fold + 1}/{config.k_folds}")
 
-        val_subset = Subset(train_dataset, val_idx)
-        val_loader = data_loader.get_data_loader('dev', val_subset)
+        train_pids_fold = [participant_ids[i] for i in train_idx]
+        val_pids_fold = [participant_ids[i] for i in val_idx]
 
-        train_subset = Subset(train_dataset, train_idx)
-        train_loader = data_loader.get_data_loader('train', train_subset)
+        train_info_fold = {pid: data_loader.participant_info[pid] for pid in train_pids_fold}
+        val_info_fold = {pid: data_loader.participant_info[pid] for pid in val_pids_fold}
+
+        train_dataset_fold = Dataset(config, train_info_fold, is_train=True)
+        val_dataset_fold = Dataset(config, val_info_fold)
+
+        train_loader = data_loader.get_data_loader('train', train_dataset_fold)
+        val_loader = data_loader.get_data_loader('dev', val_dataset_fold)
 
         model = SSLModel(config)
         if fold == 0: 
