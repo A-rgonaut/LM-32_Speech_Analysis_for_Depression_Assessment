@@ -1,11 +1,10 @@
 import os
 import torch
-import librosa
 from transformers import AutoModel, AutoFeatureExtractor
 from tqdm.auto import tqdm
 import pandas as pd
 
-from ..audio_utils import segment_audio_by_transcript, segment_audio_sliding_window
+from ..audio_utils import load_audio, segment_audio_by_transcript, segment_audio_sliding_window
 from ..pooling_layers import MeanPoolingLayer
 
 class FeatureExtractor:
@@ -18,15 +17,12 @@ class FeatureExtractor:
 
         print(f"Loading model: {config.model_name}")
         self.model = AutoModel.from_pretrained(config.model_name, output_hidden_states=True).to(self.device)
-        self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name)
+        self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name, do_normalize=True)
         self.mean_pooling = MeanPoolingLayer().to(self.device)
         self.model.eval() 
 
     @torch.no_grad()
     def extract_and_save(self, audio_paths, split_name):
-        """
-        Extracts features from a list of audio files and saves them to disk.
-        """
         output_dir = self.config.feature_path
         os.makedirs(output_dir, exist_ok=True)
         print(f"Saving features for '{split_name}' split in: {output_dir}")
@@ -37,13 +33,8 @@ class FeatureExtractor:
             filename = os.path.basename(audio_path).replace('.wav', '.pt')
             save_path = os.path.join(output_dir, filename)
 
-            # Skip if the file already exists
-            if os.path.exists(save_path):
-                continue
-
             # Load and segment the audio
-            audio, _ = librosa.load(audio_path, sr=self.sample_rate)
-            audio = audio.squeeze()
+            audio = load_audio(audio_path, self.sample_rate)
             segments = [] 
             if self.config.segmentation_strategy == 'transcript':
                 transcript_path = audio_path.replace('_AUDIO.wav', '_Transcript.csv')

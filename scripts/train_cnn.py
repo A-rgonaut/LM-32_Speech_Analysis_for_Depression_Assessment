@@ -4,12 +4,12 @@ from comet_ml import Experiment
 import numpy as np
 import random
 from torch.utils.data import Subset
-from sklearn.model_selection import StratifiedGroupKFold, GroupShuffleSplit
+from sklearn.model_selection import StratifiedGroupKFold
 
 from src.cnn_module.config import CNNConfig
 from src.cnn_module.data_loader import DataLoader
 from src.cnn_module.model import CNNModel
-from src.cnn_module.trainer import Trainer
+from src.trainer import Trainer
 from src.utils import set_seed, clear_cache
 
 def main():
@@ -31,12 +31,18 @@ def main():
     segment_groups = [seg[0] for seg in train_dataset.segments]
     
     if config.k_folds == 1:
-        kfold = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=config.seed)
+        validation_split_fraction = 0.1
+        n_splits_for_single_run = int(1 / validation_split_fraction)
+        kfold = StratifiedGroupKFold(n_splits=n_splits_for_single_run, shuffle=True, random_state=config.seed)
     else:
         kfold = StratifiedGroupKFold(n_splits=config.k_folds, shuffle=True, random_state=config.seed)
 
-    for fold, (train_segment_idx, val_segment_idx) in enumerate(kfold.split(segment_indices_for_split, segment_labels, segment_groups)):
+    kfold_splitter = kfold.split(segment_indices_for_split, segment_labels, segment_groups)
+
+    for fold in range(config.k_folds):
         print(f"\nTraining Fold {fold + 1}/{config.k_folds}")
+
+        train_segment_idx, val_segment_idx = next(kfold_splitter)
 
         val_subset = Subset(train_dataset, val_segment_idx)
         val_loader = data_loader.get_data_loader('dev', val_subset)
@@ -71,6 +77,12 @@ def main():
         train_subset = Subset(train_dataset, final_train_idx)
         train_loader = data_loader.get_data_loader('train', train_subset)
         model = CNNModel(config)
+        if fold == 0: 
+            total_params = sum(p.numel() for p in model.parameters())
+            trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            print(f"CNNModel created.")
+            print(f"  Total parameters: {total_params/1e6:.2f}M")
+            print(f"  Trainable parameters: {trainable_params/1e6:.2f}M")
         
         trainer = Trainer(model, train_loader, val_loader, config)
         with experiment.context_manager(f"fold_{fold+1}"):

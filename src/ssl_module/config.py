@@ -1,17 +1,17 @@
 class SSLConfig:
     def __init__(self):
-        self.edaic_aug = False
+        self.edaic_aug = True
         self.seed = 42
-        self.k_folds = 1
-        self.eval_strategy = 'average'
+        self.k_folds = 10
+        self.eval_strategy = 'majority' # 'average' or 'majority'
         
         self.segmentation_strategy = 'fixed_length' # 'fixed_length' or 'transcript'
         self.sample_rate = 16000
         self.max_utt_seconds = 10.0
-        self.min_utt_seconds = 7.0
+        self.min_utt_seconds = 0.0
         self.overlap_seconds = 0.0
-        self.use_random_chunking = True
         self.chunk_segments = 10
+        self.chunk_overlap_segments = 0
 
         self.use_preextracted_features = True # Se True, usa feature pre-estratte. Se False, calcola al volo.
         self.num_layers_to_unfreeze = 0 # Deve essere 0 se use_preextracted_features è True
@@ -21,15 +21,18 @@ class SSLConfig:
 
         self.dropout_rate = 0.1
         self.feature_path = f'features/{self.model_name}/'
-        self.seq_model_type = 'transformer' 
+        self.seq_model_type = 'transformer'
         self.seq_hidden_size = 128
         self.seq_num_layers = 2
         self.transformer_nhead = 4
 
         self.gradient_accumulation_steps = 1
-        self.epochs = 20 # Numero fisso di epoche per fold
+        self.epochs = 20
         self.batch_size = 16
-        self.learning_rate = 1e-5
+        if self.num_layers_to_unfreeze == 0:
+            self.learning_rate = 1e-5
+        else:
+            self.learning_rate = 1e-5
         self.early_stopping_patience = 5
         self.early_stopping_min_delta = 0.01
         self.early_stopping_mode = 'max'

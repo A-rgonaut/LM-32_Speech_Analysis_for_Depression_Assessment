@@ -16,7 +16,8 @@ class Evaluator:
         pred_y = self.model.predict(self.test_X)
         pred_scores = self.model.predict_proba(self.test_X)[:, 1]
 
-        metrics = get_metrics(self.test_y, pred_y, y_score=pred_scores)
+        metrics = get_metrics(self.test_y, pred_y, 'accuracy', 'f1_macro', 'roc_auc',
+                                'sensitivity', 'specificity', 'f1_depression', y_score=pred_scores)
         metrics['feature_type'] = feature_type
 
         print(f"Evaluation for feature: {feature_type} on {eval_type} set")

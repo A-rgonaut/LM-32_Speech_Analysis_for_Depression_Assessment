@@ -2,8 +2,8 @@ class CNNConfig:
     def __init__(self):
         self.edaic_aug = False
         self.seed = 42
-        self.k_folds = 5
-        self.balance_segments = True
+        self.k_folds = 1
+        self.balance_segments = False
         self.eval_strategy = 'majority'
         self.segmentation_strategy = 'fixed_length' # 'fixed_length' or 'transcript'
         
@@ -14,7 +14,8 @@ class CNNConfig:
 
         self.dropout_rate = 0.2
 
-        self.epochs = 50
+        self.gradient_accumulation_steps = 1
+        self.epochs = 20
         self.batch_size = 32
         self.learning_rate = 1e-3
         self.early_stopping_patience = 5

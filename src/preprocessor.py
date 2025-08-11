@@ -90,6 +90,14 @@ class E1_DAIC():
 
         return df
 
+    def clean_transcription_df(df):
+        if 'speaker' in df: df.drop(columns=['speaker'], inplace=True)
+        if 'Confidence' in df: df.drop(columns=['Confidence'], inplace=True)
+        if 'Text' in df: df.rename(columns={'Text': 'value'}, inplace=True)
+        if 'value' in df:
+            df = df[~df['value'].astype(str).str.contains(r'<synch>|<sync>|scrubbed_entry', case=False, na=False)]
+        return df
+
     # Preprocessing data based on E1-DAIC dataset CSV   
     def __preprocess(self) -> pd.DataFrame:
         """
@@ -143,21 +151,7 @@ class E1_DAIC():
                     transcription_path = f'{interview}/{interview_id_str}_Transcript.csv'
                     transcription_df = pd.read_csv(transcription_path)
 
-                # Remove speaker column if it exists
-                if 'speaker' in transcription_df.columns:
-                    transcription_df = transcription_df.drop(columns=['speaker'])
-
-                # Remove Confidence column if it exists
-                if 'Confidence' in transcription_df.columns:
-                    transcription_df = transcription_df.drop(columns=['Confidence'])
-
-                # Rename Text to value if it exists
-                if 'Text' in transcription_df.columns:
-                    transcription_df = transcription_df.rename(columns={'Text': 'value'})
-                
-                # Remove utterances that contains <synch>, <sync> and scrubbed_entry
-                if 'value' in transcription_df.columns:
-                    transcription_df = transcription_df[~transcription_df['value'].astype(str).str.contains(r'<synch>|<sync>|scrubbed_entry', case=False, na=False)]
+                transcription_df = self.clean_transcription_df(transcription_df)
 
                 # Clean up overlapping segments
                 transcription_df['Prev_End_Time'] = transcription_df['End_Time'].shift(1)

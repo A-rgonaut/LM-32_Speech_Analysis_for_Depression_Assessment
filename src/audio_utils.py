@@ -1,5 +1,4 @@
 import librosa
-import torch
 import numpy as np
 
 def segment_audio_by_transcript(
@@ -69,9 +68,9 @@ def segment_audio_by_transcript(
                     full_segment = np.concatenate(current_utterances_audio)
                     segments.append(full_segment)
                 
-                # The remainder of the new utterance will be chunked.
-                audio_to_chunk = utterance_audio[space_left:]
-                current_segment_start_sample = start_sample + space_left
+                # The entire new utterance will be chunked from its beginning.
+                audio_to_chunk = utterance_audio
+                current_segment_start_sample = start_sample
 
             current_utterances_audio = []
             current_duration_samples = 0
@@ -136,8 +135,13 @@ def segment_audio_sliding_window(
         else:
             segments.append(segment)
 
-    if segments and len(segments[-1]) < min_samples:
-        segments.pop()
+    if segments:
+        if return_indices:
+            last_len = segments[-1][1] - segments[-1][0]
+        else:
+            last_len = len(segments[-1])
+        if last_len < min_samples:
+            segments.pop()
         
     return segments
 
@@ -152,5 +156,4 @@ def load_audio(audio_path, sample_rate=16_000, offset_samples=0, duration_sample
     if len(audio.shape) > 1:
         audio = audio.mean(axis=0)
     audio = audio.squeeze()
-    audio = torch.tensor(audio, dtype=torch.float32)
     return audio

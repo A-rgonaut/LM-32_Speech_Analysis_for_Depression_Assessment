@@ -1,29 +1,32 @@
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-import numpy as np
-import os
 from transformers import get_linear_schedule_with_warmup
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+import os
 
-from .config import SSLConfig
-from .data_loader import DataLoader
-from .model import SSLModel
-from ..utils  import EarlyStopping, get_metrics
+from .cnn_module.config import CNNConfig
+from .utils import EarlyStopping, get_metrics, get_predictions, aggregate_predictions
 
 class Trainer():
-    def __init__(self, model : SSLModel, train_loader : DataLoader, val_loader: DataLoader, config: SSLConfig):
+    def __init__(self, model, train_loader, val_loader, config):
         self.config = config
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=config.learning_rate, weight_decay=0.01)
-        self.scheduler = None
+        self.model_name = 'ssl'
+        self.scheduler_step = ''
+        if isinstance(config, CNNConfig):
+            self.model_name = 'cnn'
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.criterion = nn.BCEWithLogitsLoss() 
         self.model.to(self.device)
 
     def train_epoch(self):
         self.model.train()
+        if hasattr(self.model, 'ssl_model') and self.model.num_layers_to_unfreeze == 0:
+            self.model.ssl_model.eval()
         tot_loss = 0
         accumulation_steps = self.config.gradient_accumulation_steps 
         self.optimizer.zero_grad()
@@ -50,7 +53,7 @@ class Trainer():
             if (i + 1) % accumulation_steps == 0 or (i + 1) == len(self.train_loader):
                 #torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
-                if self.scheduler:
+                if self.scheduler_step == 'batch':
                     self.scheduler.step()
                 self.optimizer.zero_grad()
 
@@ -60,48 +63,13 @@ class Trainer():
     def validate_epoch(self):
         self.model.eval()
 
-        total_loss = 0
-        session_targets = {}
-        session_scores = {}
+        session_scores, session_targets, avg_loss = get_predictions(
+            self.val_loader, self.model, "Validation", self.device, self.criterion
+        )
 
-        with torch.no_grad():
-            for batch in tqdm(self.val_loader, desc="Validating Epoch"):
-                batch = {k: v.to(self.device) for k, v in batch.items()}
-                audio_ids = batch.pop('audio_id')
-                labels = batch['label']
-
-                outputs = self.model(batch)
-                loss = self.criterion(outputs, labels)
-                total_loss += loss.item()
-                scores = torch.sigmoid(outputs)
-
-                for idx in range(len(audio_ids)):
-                    session_id = audio_ids[idx].item()
-                    score = scores[idx].item()
-                    target = labels[idx].item()
-
-                    if session_id not in session_scores:
-                        session_scores[session_id] = []
-                    
-                    session_scores[session_id].append(score)
-                    session_targets[session_id] = target
-
-        final_predictions, final_targets, final_scores = [], [], []
-        
-        for session_id in session_scores:
-            if self.config.eval_strategy == 'average':
-                avg_score = np.mean(session_scores[session_id])
-                predicted_label = 1 if avg_score > 0.5 else 0
-                final_scores.append(avg_score)
-            elif self.config.eval_strategy == 'majority':
-                segment_predictions = [1 if score > 0.5 else 0 for score in session_scores[session_id]]
-                predicted_label = max(set(segment_predictions), key=segment_predictions.count)
-                final_scores.append(np.mean(session_scores[session_id]))
-
-            final_predictions.append(predicted_label)
-            final_targets.append(session_targets[session_id])
-
-        avg_loss = total_loss / len(self.val_loader)
+        final_predictions, final_targets, final_scores = aggregate_predictions(
+            session_scores, session_targets, self.config.eval_strategy
+        )
         
         metrics = get_metrics(final_targets, final_predictions, 'f1_macro', 'f1_depression', 'accuracy', y_score=final_scores)
 
@@ -116,15 +84,17 @@ class Trainer():
             mode = self.config.early_stopping_mode
         )
 
-        accumulation_steps = self.config.gradient_accumulation_steps 
-        num_training_steps = int(len(self.train_loader) * self.config.epochs) // accumulation_steps
-        num_warmup_steps = int(num_training_steps * 0.10)
-        
-        self.scheduler = get_linear_schedule_with_warmup(
-            self.optimizer,
-            num_warmup_steps=num_warmup_steps,
-            num_training_steps=num_training_steps
-        )
+        if self.model_name == 'cnn':
+            self.scheduler = ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=3)
+            self.scheduler_step = 'epoch'
+        else:
+            num_training_steps = int(len(self.train_loader) * self.config.epochs) // self.config.gradient_accumulation_steps
+            self.scheduler = get_linear_schedule_with_warmup(
+                optimizer=self.optimizer,
+                num_warmup_steps=int(num_training_steps * 0.1),
+                num_training_steps=num_training_steps,
+            )
+            self.scheduler_step = 'batch'
 
         best_epoch, best_val_f1 = -1, -float('inf')
 
@@ -139,6 +109,8 @@ class Trainer():
             experiment.log_metric("val/accuracy", val_acc, step=epoch)
             experiment.log_metric("val/f1_macro", val_f1_macro, step=epoch)
             experiment.log_metric("val/f1_depression", val_f1_depression, step=epoch)
+
+            if self.scheduler_step == 'epoch': self.scheduler.step(val_f1_macro)
 
             if val_f1_macro > best_val_f1:
                 best_val_f1 = val_f1_macro

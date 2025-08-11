@@ -66,6 +66,7 @@ class Dataset(TorchDataset):
             offset_samples=start_sample,
             duration_samples=end_sample - start_sample
         )
+        segment = torch.tensor(segment, dtype=torch.float32)
 
         target_length = int(self.max_utt_seconds * self.sample_rate)
         current_length = len(segment)

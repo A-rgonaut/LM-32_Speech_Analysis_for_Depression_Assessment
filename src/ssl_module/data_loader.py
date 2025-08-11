@@ -1,7 +1,6 @@
 import os
 import torch
 import pandas as pd
-import librosa
 from torch.utils.data import Dataset as TorchDataset, DataLoader as TorchDataLoader
 from transformers import AutoFeatureExtractor
 
@@ -18,45 +17,42 @@ class Dataset(TorchDataset):
         self.is_train = is_train
 
         if not config.use_preextracted_features:
-            self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name, do_normalize=False)
+            self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name, do_normalize=True)
 
-        # Crea una lista di "item" che il dataset può restituire.
-        # Ogni item è un chunk.
         self.indexable_items = []
-        if self.is_train:
-            # In training, il sampler lavora con gli ID, quindi la lista è solo di ID.
-            self.indexable_items = list(self.participant_info.keys())
-        else:
-            # In eval, creiamo una lista di tutti i chunk possibili in modo deterministico.
+        if not self.is_train:
+            print(f"Creating deterministic index for evaluation set with {len(participant_info)} participants...")
             for pid, info in self.participant_info.items():
-                total_segments = info['total_segments']
+                total_segments = info.get('total_segments', 0)
                 chunk_size = self.config.chunk_segments
+                step = self.config.chunk_segments - self.config.chunk_overlap_segments
                 
-                # Usiamo uno step uguale a chunk_size per chunk non sovrapposti
-                for start_idx in range(0, total_segments, chunk_size):
-                    self.indexable_items.append({'participant_id': pid, 'start_index': start_idx})
+                for start_idx in range(0, total_segments, step):
+                    if start_idx < total_segments:
+                         self.indexable_items.append({'participant_id': pid, 'start_index': start_idx})
 
     def __len__(self):
+        if self.is_train:
+            return len(self.participant_info)
         return len(self.indexable_items)
 
     def __getitem__(self, idx):
-        if self.is_train:
-            # --- TRAINING ---
-            # 'idx' qui è un dizionario dal sampler {'id':..., 'start':...}
-            participant_id = idx['participant_id']
-            start_index = idx['start_index']
-        else:
+        if isinstance(idx, int):
             # --- EVALUATION ---
-            # 'idx' è un intero. Prendiamo l'istruzione dalla nostra lista di chunk
             item_info = self.indexable_items[idx]
             participant_id = item_info['participant_id']
             start_index = item_info['start_index']
+        else: # idx è un dizionario {'participant_id': ..., 'start_index': ...}
+            # --- TRAINING ---
+            participant_id = idx['participant_id']
+            start_index = idx['start_index']
 
         participant_data = self.participant_info[participant_id]
         label = torch.tensor(participant_data['label'], dtype=torch.float32)
         audio_id = torch.tensor(int(participant_id), dtype=torch.long)
         chunk_size = self.config.chunk_segments
         end_index = start_index + chunk_size
+        chunk_padding_mask = torch.zeros(chunk_size, dtype=torch.bool)
 
         if self.config.use_preextracted_features:
             feature_filename = f"{participant_id}_AUDIO_layer_{self.config.layer_to_use}.pt"
@@ -70,52 +66,45 @@ class Dataset(TorchDataset):
                 padding_size = chunk_size - actual_len
                 padding = torch.zeros((padding_size, feature_chunk.shape[1]), dtype=feature_chunk.dtype)
                 feature_chunk = torch.cat([feature_chunk, padding], dim=0)
+                chunk_padding_mask[actual_len:] = True
 
             return {
                 'segment_features': feature_chunk, # (chunk_size, feature_dim)
                 'label': label,
-                'audio_id': audio_id
+                'audio_id': audio_id,
+                'chunk_padding_mask': chunk_padding_mask
             }
         else:
-            audio_path = participant_data['path']
-            audio = load_audio(audio_path, self.sample_rate)
-
-            segments = []
-            if self.config.segmentation_strategy == 'transcript':
-                transcript_path = audio_path.replace("_AUDIO.wav", "_Transcript.csv")
-                transcript_df = pd.read_csv(transcript_path)
-                segments = segment_audio_by_transcript(audio, transcript_df, self.config.sample_rate, self.config.max_utt_seconds, 
-                self.config.min_utt_seconds, self.config.overlap_seconds)
-            else: # 'fixed_length'
-                segments = segment_audio_sliding_window(audio, self.config.sample_rate, self.config.max_utt_seconds,
-                self.config.min_utt_seconds, self.config.overlap_seconds)
-
-            all_input_values = []
-            all_attention_masks = []
+            indices = participant_data['segment_indices']
+            segment_indices = indices[start_index:end_index]
+            first_start = segment_indices[0][0]
+            last_end = segment_indices[-1][1]
+            chunk_audio = load_audio(
+                participant_data['path'],
+                sample_rate=self.config.sample_rate,
+                offset_samples=first_start,
+                duration_samples=last_end - first_start
+            )
+            segments = [
+                chunk_audio[start_s - first_start : end_s - first_start]
+                for start_s, end_s in segment_indices
+            ]
             segment_samples = int(self.config.max_utt_seconds * self.config.sample_rate)
             
-            for segment in segments:
-                features = self.feature_extractor(
-                    segment, 
-                    sampling_rate=self.config.sample_rate,
-                    max_length=segment_samples,
-                    padding='max_length',
-                    truncation=True,
-                    return_tensors='pt',
-                    return_attention_mask=True,
-                )
-                # features['input_values'] has shape [1, N]
-                all_input_values.append(features['input_values'].squeeze(0)) 
-                all_attention_masks.append(features['attention_mask'].squeeze(0))
+            features = self.feature_extractor(
+                segments, 
+                sampling_rate=self.config.sample_rate,
+                max_length=segment_samples,
+                padding='max_length',
+                truncation=True,
+                return_tensors='pt',
+                return_attention_mask=True,
+            )
+
+            chunk_input_values = features['input_values']
+            chunk_attention_masks = features['attention_mask']
             
-            stacked_input_values = torch.stack(all_input_values)
-            stacked_attention_masks = torch.stack(all_attention_masks)
-
-            chunk_input_values = stacked_input_values[start_index:end_index]
-            chunk_attention_masks = stacked_attention_masks[start_index:end_index]
-
             actual_len = chunk_input_values.shape[0]
-            chunk_size = self.config.chunk_segments
             if actual_len < chunk_size:
                 padding_size = chunk_size - actual_len
                 
@@ -126,12 +115,14 @@ class Dataset(TorchDataset):
                 # Padding per le maschere
                 padding_masks = torch.zeros((padding_size, chunk_attention_masks.shape[1]), dtype=chunk_attention_masks.dtype)
                 chunk_attention_masks = torch.cat([chunk_attention_masks, padding_masks], dim=0)
+                chunk_padding_mask[actual_len:] = True
 
             return {
-                'input_values': chunk_input_values,  # (chunk_size, seq_len)
-                'attention_mask_segment': chunk_attention_masks,  # (chunk_size,)
+                'input_values': chunk_input_values,
+                'attention_mask_segment': chunk_attention_masks,
                 'label': label,
                 'audio_id': audio_id,
+                'chunk_padding_mask': chunk_padding_mask
             }
 
 def collate_fn(batch):
@@ -141,13 +132,16 @@ def collate_fn(batch):
     """
     labels = torch.stack([item['label'] for item in batch])
     audio_ids = torch.stack([item['audio_id'] for item in batch])
+    chunk_padding_masks = torch.stack([item['chunk_padding_mask'] for item in batch])
+
     if 'segment_features' in batch[0]:
         features = torch.stack([item['segment_features'] for item in batch])
         
         return {
             'segment_features': features,
             'label': labels,
-            'audio_id': audio_ids
+            'audio_id': audio_ids,
+            'chunk_padding_mask': chunk_padding_masks
         }
     else:
         input_values = torch.stack([item['input_values'] for item in batch])
@@ -157,7 +151,8 @@ def collate_fn(batch):
             'input_values': input_values,
             'attention_mask_segment': attention_masks,
             'label': labels,
-            'audio_id': audio_ids
+            'audio_id': audio_ids,
+            'chunk_padding_mask': chunk_padding_masks
         }
 
 class DataLoader():
@@ -169,18 +164,23 @@ class DataLoader():
             self.splits_df = filter_edaic_samples(self.splits_df)
         self._setup_participant_info()
 
-    def _get_num_segments(self, audio_path):
-        audio, _ = librosa.load(audio_path, sr=self.config.sample_rate)
+    def _get_segments(self, audio_path):
+        audio = load_audio(audio_path, self.config.sample_rate)
         if self.config.segmentation_strategy == 'transcript':
             transcript_path = audio_path.replace('_AUDIO.wav', '_Transcript.csv')
             transcript_df = pd.read_csv(transcript_path)
-            indices = segment_audio_by_transcript(audio, transcript_df, self.config.sample_rate, self.config.max_utt_seconds, 
-                self.config.min_utt_seconds, self.config.overlap_seconds, return_indices=True)
-        else: # 'fixed_length'
-            indices = segment_audio_sliding_window(audio, self.config.sample_rate, self.config.max_utt_seconds,
-            self.config.min_utt_seconds, self.config.overlap_seconds, return_indices=True)
-
-        return len(indices)
+            indices = segment_audio_by_transcript(
+                audio, transcript_df, self.config.sample_rate, 
+                self.config.max_utt_seconds, self.config.min_utt_seconds, 
+                self.config.overlap_seconds, return_indices=True
+            )
+        else:
+            indices = segment_audio_sliding_window(
+                audio, self.config.sample_rate, self.config.max_utt_seconds,
+                self.config.min_utt_seconds, self.config.overlap_seconds,
+                return_indices=True
+            )
+        return indices
 
     def _setup_participant_info(self):
         self.participant_info = {}
@@ -202,39 +202,31 @@ class DataLoader():
         for path in all_paths:
             participant_id = int(os.path.basename(path).replace('_AUDIO.wav', ''))
             num_segments = 0
+            self.participant_info[participant_id] = {
+                'path': path,
+                'label': path_to_label.get(path, -1),
+            }
             if self.config.use_preextracted_features:
                 feature_filename = os.path.basename(path).replace('.wav', '.pt')
                 num_segments = _metadata_df_map.get(feature_filename, 0)
             else:
-                num_segments = self._get_num_segments(path)
+                indices = self._get_segments(path)
+                num_segments = len(indices)
+                self.participant_info[participant_id]['segment_indices'] = indices
 
-            self.participant_info[participant_id] = {
-                'path': path, 'label': path_to_label.get(path, -1), 'total_segments': num_segments
-            }
+            self.participant_info[participant_id]['total_segments'] = num_segments
 
     def get_dataset(self, split: str):
         train_df, test_df, dev_df = self.splits_df
-
-        if split == 'train':
-            target_df = train_df
-        elif split == 'dev':
-            target_df = dev_df
-        else:
-            target_df = test_df
+        if split == 'train': target_df = train_df
+        elif split == 'dev': target_df = dev_df
+        else: target_df = test_df
 
         participant_ids_for_split = [row["Participant_ID"] for _, row in target_df.iterrows()]
 
-        split_participant_info = {
-            pid: self.participant_info[pid] 
-            for pid in participant_ids_for_split
-            if pid in self.participant_info
-        }
+        split_participant_info = {pid: self.participant_info[pid] for pid in participant_ids_for_split if pid in self.participant_info}
 
-        return Dataset(
-            config=self.config, 
-            participant_info=split_participant_info, 
-            is_train=(split == 'train')
-        )
+        return Dataset(config=self.config, participant_info=split_participant_info, is_train=(split == 'train'))
 
     def get_data_loader(self, split: str, dataset: TorchDataset = None):
         if dataset is None:
@@ -242,12 +234,40 @@ class DataLoader():
 
         is_train = split == 'train'
         
-        if is_train and self.config.use_random_chunking:
-            sampler = BalancedParticipantSampler(dataset, self.config.batch_size, self.config.chunk_segments)
+        if is_train:
+            participant_info_fold = dataset.participant_info
+            
+            # 2. Prepara i chunk raggruppati per speaker USANDO SOLO I DATI DEL FOLD.
+            positive_chunks_by_pid = {}
+            negative_chunks_by_pid = {}
+            for pid, info in participant_info_fold.items():
+                total_segments = info.get('total_segments', 0)
+                chunk_size = self.config.chunk_segments
+                
+                overlap = self.config.chunk_overlap_segments
+                step = chunk_size - overlap
+
+                participant_chunks = []
+                for start_idx in range(0, total_segments, step):
+                     if start_idx < total_segments:
+                        participant_chunks.append({'participant_id': pid, 'start_index': start_idx})
+
+                if info['label'] == 1:
+                    positive_chunks_by_pid[pid] = participant_chunks
+                else:
+                    negative_chunks_by_pid[pid] = participant_chunks
+            
+            print(f"Sampler data prepared for this fold: {len(positive_chunks_by_pid)} pos participants, {len(negative_chunks_by_pid)} neg participants.")
+
+            sampler = BalancedParticipantSampler(
+                positive_chunks_by_pid=positive_chunks_by_pid,
+                negative_chunks_by_pid=negative_chunks_by_pid,
+                batch_size=self.config.batch_size)
+            
             return TorchDataLoader(
                 dataset,
                 batch_sampler=sampler,
-                num_workers=os.cpu_count(),
+                num_workers=8,
                 collate_fn=collate_fn,
                 pin_memory=True
             )
@@ -255,8 +275,8 @@ class DataLoader():
             return TorchDataLoader(
                 dataset, 
                 batch_size=self.config.batch_size,
-                shuffle=False,
-                num_workers=os.cpu_count(),
+                shuffle=is_train,
+                num_workers=8,
                 collate_fn=collate_fn,
                 pin_memory=True
             )
