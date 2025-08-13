@@ -11,10 +11,9 @@ class SSLConfig:
         self.min_utt_seconds = 0.0
         self.overlap_seconds = 0.0
         self.chunk_segments = 10
-        self.chunk_overlap_segments = 0
+        self.chunk_overlap_segments = 1
 
-        self.use_preextracted_features = True # Se True, usa feature pre-estratte. Se False, calcola al volo.
-        self.num_layers_to_unfreeze = 0 # Deve essere 0 se use_preextracted_features è True
+        self.use_preextracted_features = True
         self.layer_to_use = 8
         self.aggregate_layers = False
         self.model_name = 'facebook/wav2vec2-base-960h'
@@ -29,10 +28,7 @@ class SSLConfig:
         self.gradient_accumulation_steps = 1
         self.epochs = 20
         self.batch_size = 16
-        if self.num_layers_to_unfreeze == 0:
-            self.learning_rate = 1e-5
-        else:
-            self.learning_rate = 1e-5
+        self.learning_rate = 1e-5
         self.early_stopping_patience = 5
         self.early_stopping_min_delta = 0.01
         self.early_stopping_mode = 'max'

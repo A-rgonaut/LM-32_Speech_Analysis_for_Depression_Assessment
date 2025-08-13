@@ -31,14 +31,13 @@ class Evaluator:
             session_scores, session_targets, _ = get_predictions(
                 self.test_loader, model, f"Evaluating {eval_type} set with model {i}", self.device
             )
-            '''
+            #'''
             for session_id, scores_list in session_scores.items():
                 all_session_scores[session_id].extend(scores_list)
 
             all_session_targets.update(session_targets)
 
             '''
-            #'''
             final_predictions, final_targets, final_scores = aggregate_predictions(
                 session_scores, session_targets, self.config.eval_strategy
             )
@@ -46,9 +45,9 @@ class Evaluator:
             metrics = get_metrics(final_targets, final_predictions, 'accuracy', 'f1_macro', 'roc_auc',
                                 'sensitivity', 'specificity', 'f1_depression', y_score=final_scores)
             all_metrics.append(metrics)
-            
+            #'''
             clear_cache()
-        
+        '''
         df_metrics = pd.DataFrame(all_metrics)
         mean_metrics = df_metrics.mean()
         std_metrics = df_metrics.std()
@@ -59,6 +58,7 @@ class Evaluator:
         print("\nStandard Deviation of Metrics across folds:")
         print(std_metrics)
         summary_df = pd.DataFrame({'mean': mean_metrics, 'std': std_metrics})
+        self.save_results(summary_df, eval_type)
         '''
         final_predictions, final_targets, final_scores = aggregate_predictions(
             all_session_scores, all_session_targets, self.config.eval_strategy
@@ -71,8 +71,8 @@ class Evaluator:
         print("Metrics:")
         print(df_metrics)
 
-        self.save_results(df_metrics, eval_type)'''
-        self.save_results(summary_df, eval_type)
+        self.save_results(df_metrics, eval_type)
+        #'''
 
     def save_results(self, metrics_data, eval_type):
         if self.config.result_dir and not os.path.exists(self.config.result_dir):

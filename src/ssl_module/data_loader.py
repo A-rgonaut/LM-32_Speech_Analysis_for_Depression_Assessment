@@ -24,7 +24,6 @@ class Dataset(TorchDataset):
             print(f"Creating deterministic index for evaluation set with {len(participant_info)} participants...")
             for pid, info in self.participant_info.items():
                 total_segments = info.get('total_segments', 0)
-                chunk_size = self.config.chunk_segments
                 step = self.config.chunk_segments - self.config.chunk_overlap_segments
                 
                 for start_idx in range(0, total_segments, step):

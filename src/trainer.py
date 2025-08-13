@@ -25,7 +25,7 @@ class Trainer():
 
     def train_epoch(self):
         self.model.train()
-        if hasattr(self.model, 'ssl_model') and self.model.num_layers_to_unfreeze == 0:
+        if hasattr(self.model, 'ssl_model') and all(not p.requires_grad for p in self.model.ssl_model.parameters()):
             self.model.ssl_model.eval()
         tot_loss = 0
         accumulation_steps = self.config.gradient_accumulation_steps 

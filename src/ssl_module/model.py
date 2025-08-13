@@ -27,19 +27,6 @@ class SSLModel(nn.Module):
             # Freeze SSL weights 
             for param in self.ssl_model.parameters():
                 param.requires_grad = False
-
-            # Unfreeze last N encoder layers
-            if self.num_layers_to_unfreeze > 0:
-                encoder_layers = self.ssl_model.encoder.layers
-                num_encoder_layers = len(encoder_layers)
-
-                layers_to_unfreeze = min(self.num_layers_to_unfreeze, num_encoder_layers)
-                
-                print(f"Unfreezing the last {layers_to_unfreeze} transformer layers.")
-                
-                for layer in encoder_layers[-layers_to_unfreeze:]:
-                    for param in layer.parameters():
-                        param.requires_grad = True
             
             if self.aggregate_layers:
                 # Weighted sum of SSL model's hidden layers
@@ -75,15 +62,15 @@ class SSLModel(nn.Module):
             encoder_layer = nn.TransformerEncoderLayer(
                 d_model=self.seq_hidden_size,
                 nhead=config.transformer_nhead,  # nhead must be a divisor of d_model (e.g. 768 % 4 == 0)
-                dim_feedforward=self.seq_hidden_size * 2, # Common practice
+                dim_feedforward=self.seq_hidden_size * 2,
                 dropout=self.dropout,
                 activation='relu',
                 batch_first=True 
             )
             self.sequence_model = nn.TransformerEncoder(encoder_layer, num_layers=self.num_layers)
             self.seq_output_dim = self.seq_hidden_size
-            #self.audio_embedding_pooling = AttentionPoolingLayer(embed_dim=self.seq_output_dim)
-            self.audio_embedding_pooling = MeanPoolingLayer()
+            self.audio_embedding_pooling = AttentionPoolingLayer(embed_dim=self.seq_output_dim)
+            #self.audio_embedding_pooling = MeanPoolingLayer()
 
         self.audio_embedding_dim = self.seq_output_dim
 
@@ -122,14 +109,7 @@ class SSLModel(nn.Module):
             # Flatten for SSL model: (bs * num_segments, seq_len)
             input_values = input_values.view(batch_size * num_segments, -1)
 
-            if self.num_layers_to_unfreeze == 0:
-                with torch.no_grad():
-                    outputs = self.ssl_model(
-                        input_values=input_values,
-                        attention_mask=attention_mask_segment,
-                        return_dict=True,
-                    )
-            else:
+            with torch.no_grad():
                 outputs = self.ssl_model(
                     input_values=input_values,
                     attention_mask=attention_mask_segment,
