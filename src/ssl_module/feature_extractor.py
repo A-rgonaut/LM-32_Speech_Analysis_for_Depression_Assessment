@@ -17,7 +17,7 @@ class FeatureExtractor:
 
         print(f"Loading model: {config.model_name}")
         self.model = AutoModel.from_pretrained(config.model_name, output_hidden_states=True).to(self.device)
-        self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name, do_normalize=True)
+        self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name, do_normalize=False)
         self.mean_pooling = MeanPoolingLayer().to(self.device)
         self.model.eval() 
 

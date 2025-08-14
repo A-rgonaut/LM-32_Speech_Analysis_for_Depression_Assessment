@@ -9,11 +9,11 @@ def main():
     data_loader = DataLoader(config)
     test_loader = data_loader.get_data_loader('test')
     dev_loader = data_loader.get_data_loader('dev')
-    
-    evaluator = Evaluator(dev_loader, config, 'ssl')
+
+    evaluator = Evaluator(config, 'ssl', dev_loader)
     evaluator.evaluate('dev')
-    
-    evaluator = Evaluator(test_loader, config, 'ssl')
+
+    evaluator = Evaluator(config, 'ssl', test_loader)
     evaluator.evaluate('test')
 
 if __name__ == "__main__":

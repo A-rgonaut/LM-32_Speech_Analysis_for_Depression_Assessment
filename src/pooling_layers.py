@@ -66,3 +66,41 @@ class MeanPoolingLayer(nn.Module):
         mean_pooled = summed / num_valid_elements
 
         return mean_pooled
+    
+class GatedAttentionPoolingLayer(nn.Module):
+    """
+    Gated attention pooling (Ilse et al., 2018).
+    Input:  x -> (bs, seq_len, d)
+            mask -> (bs, seq_len) con True=padding da escludere
+    Output: pooled -> (bs, d)
+            (opz.) attn -> (bs, seq_len)
+    """
+    def __init__(self, embed_dim, attn_dim=None, return_weights=False):
+        super().__init__()
+        h = attn_dim or embed_dim  # dimensione dello spazio di attenzione
+        self.V = nn.Linear(embed_dim, h, bias=True)   # ramo "tanh"
+        self.U = nn.Linear(embed_dim, h, bias=True)   # ramo "sigmoid" (gate)
+        self.w = nn.Linear(h, 1, bias=False)          # proiezione finale
+        self.return_weights = return_weights
+
+        # inizializzazioni stabili
+        nn.init.xavier_uniform_(self.V.weight)
+        nn.init.xavier_uniform_(self.U.weight)
+        nn.init.xavier_uniform_(self.w.weight)
+        nn.init.zeros_(self.V.bias)
+        nn.init.zeros_(self.U.bias)
+
+    def forward(self, x, mask=None):
+        H = torch.tanh(self.V(x)) * torch.sigmoid(self.U(x))   # (bs, L, h)
+        scores = self.w(H)                                     # (bs, L, 1)
+
+        if mask is not None:
+            # True = padding → metti -inf prima del softmax
+            scores = scores.masked_fill(mask.unsqueeze(-1), float('-inf'))
+
+        attn = torch.softmax(scores, dim=1)                    # (bs, L, 1)
+        pooled = torch.sum(attn * x, dim=1)                    # (bs, d)
+
+        if self.return_weights:
+            return pooled, attn.squeeze(-1)
+        return pooled

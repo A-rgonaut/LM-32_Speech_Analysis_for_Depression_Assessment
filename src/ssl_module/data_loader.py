@@ -17,18 +17,22 @@ class Dataset(TorchDataset):
         self.is_train = is_train
 
         if not config.use_preextracted_features:
-            self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name, do_normalize=True)
+            self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name, do_normalize=False)
 
         self.indexable_items = []
-        if not self.is_train:
-            print(f"Creating deterministic index for evaluation set with {len(participant_info)} participants...")
+        if self.is_train and self.config.use_random_chunking:
+            # In training, il sampler lavora con gli ID, quindi la lista è solo di ID.
+            self.indexable_items = list(self.participant_info.keys())
+        else:
+            # In eval, creiamo una lista di tutti i chunk possibili in modo deterministico.
             for pid, info in self.participant_info.items():
-                total_segments = info.get('total_segments', 0)
-                step = self.config.chunk_segments - self.config.chunk_overlap_segments
+                total_segments = info['total_segments']
+                chunk_size = self.config.chunk_segments
+                step = chunk_size - self.config.chunk_overlap_segments
                 
+                # Usiamo uno step uguale a chunk_size per chunk non sovrapposti
                 for start_idx in range(0, total_segments, step):
-                    if start_idx < total_segments:
-                         self.indexable_items.append({'participant_id': pid, 'start_index': start_idx})
+                    self.indexable_items.append({'participant_id': pid, 'start_index': start_idx})
 
     def __len__(self):
         if self.is_train:
@@ -36,15 +40,15 @@ class Dataset(TorchDataset):
         return len(self.indexable_items)
 
     def __getitem__(self, idx):
-        if isinstance(idx, int):
-            # --- EVALUATION ---
+        if self.is_train and self.config.use_random_chunking:
+            # 'idx' qui è un dizionario dal sampler {'id':..., 'start':...}
+            participant_id = idx['participant_id']
+            start_index = idx['start_index']
+        else:
+            # 'idx' è un intero. Prendiamo l'istruzione dalla nostra lista di chunk
             item_info = self.indexable_items[idx]
             participant_id = item_info['participant_id']
             start_index = item_info['start_index']
-        else: # idx è un dizionario {'participant_id': ..., 'start_index': ...}
-            # --- TRAINING ---
-            participant_id = idx['participant_id']
-            start_index = idx['start_index']
 
         participant_data = self.participant_info[participant_id]
         label = torch.tensor(participant_data['label'], dtype=torch.float32)
@@ -233,40 +237,12 @@ class DataLoader():
 
         is_train = split == 'train'
         
-        if is_train:
-            participant_info_fold = dataset.participant_info
-            
-            # 2. Prepara i chunk raggruppati per speaker USANDO SOLO I DATI DEL FOLD.
-            positive_chunks_by_pid = {}
-            negative_chunks_by_pid = {}
-            for pid, info in participant_info_fold.items():
-                total_segments = info.get('total_segments', 0)
-                chunk_size = self.config.chunk_segments
-                
-                overlap = self.config.chunk_overlap_segments
-                step = chunk_size - overlap
-
-                participant_chunks = []
-                for start_idx in range(0, total_segments, step):
-                     if start_idx < total_segments:
-                        participant_chunks.append({'participant_id': pid, 'start_index': start_idx})
-
-                if info['label'] == 1:
-                    positive_chunks_by_pid[pid] = participant_chunks
-                else:
-                    negative_chunks_by_pid[pid] = participant_chunks
-            
-            print(f"Sampler data prepared for this fold: {len(positive_chunks_by_pid)} pos participants, {len(negative_chunks_by_pid)} neg participants.")
-
-            sampler = BalancedParticipantSampler(
-                positive_chunks_by_pid=positive_chunks_by_pid,
-                negative_chunks_by_pid=negative_chunks_by_pid,
-                batch_size=self.config.batch_size)
-            
+        if is_train and self.config.use_random_chunking:
+            sampler = BalancedParticipantSampler(dataset)
             return TorchDataLoader(
                 dataset,
                 batch_sampler=sampler,
-                num_workers=8,
+                num_workers=os.cpu_count(),
                 collate_fn=collate_fn,
                 pin_memory=True
             )

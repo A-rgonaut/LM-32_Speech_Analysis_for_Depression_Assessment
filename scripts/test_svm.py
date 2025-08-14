@@ -2,7 +2,7 @@ import numpy as np
 
 from src.svm_module.config import SVMConfig
 from src.svm_module.data_loader import DataLoader
-from src.svm_module.evaluator import Evaluator
+from src.evaluator import Evaluator
 from src.svm_module.model import SVMModel
 from src.utils import set_seed
 
@@ -37,11 +37,11 @@ def main():
         model = SVMModel(config)
         model.load_model(feature_type)
 
-        evaluator = Evaluator(model.model, dev_X, dev_y, config)
-        evaluator.evaluate(feature_type, eval_type='dev')
+        evaluator = Evaluator(config, 'svm', (dev_X, dev_y), model.model)
+        evaluator.evaluate('dev', feature_type)
 
-        evaluator = Evaluator(model.model, test_X, test_y, config)
-        evaluator.evaluate(feature_type, eval_type='test')
+        evaluator = Evaluator(config, 'svm', (test_X, test_y), model.model)
+        evaluator.evaluate('test', feature_type)
 
 if __name__ == '__main__':
     main()

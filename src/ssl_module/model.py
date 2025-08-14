@@ -3,7 +3,7 @@ from torch import nn
 from transformers import AutoModel, AutoConfig
 
 from .config import SSLConfig
-from ..pooling_layers import AttentionPoolingLayer, MeanPoolingLayer
+from ..pooling_layers import AttentionPoolingLayer, MeanPoolingLayer, GatedAttentionPoolingLayer
 
 class SSLModel(nn.Module):
     def __init__(self, config: SSLConfig):
@@ -12,7 +12,6 @@ class SSLModel(nn.Module):
         # SSL model loading & config
         self.use_preextracted_features = config.use_preextracted_features
         if not self.use_preextracted_features:
-            self.num_layers_to_unfreeze = config.num_layers_to_unfreeze
             self.aggregate_layers = config.aggregate_layers
             self.ssl_model = AutoModel.from_pretrained(config.model_name, output_hidden_states=self.aggregate_layers)
             self.ssl_hidden_size = self.ssl_model.config.hidden_size
@@ -69,8 +68,24 @@ class SSLModel(nn.Module):
             )
             self.sequence_model = nn.TransformerEncoder(encoder_layer, num_layers=self.num_layers)
             self.seq_output_dim = self.seq_hidden_size
-            self.audio_embedding_pooling = AttentionPoolingLayer(embed_dim=self.seq_output_dim)
-            #self.audio_embedding_pooling = MeanPoolingLayer()
+        elif self.seq_model_type == 'lstm':
+            self.sequence_model = nn.LSTM(
+                input_size=self.seq_hidden_size,
+                hidden_size=self.seq_hidden_size,
+                num_layers=self.num_layers,
+                dropout=self.dropout if self.num_layers > 1 else 0.0,
+                bidirectional=True,
+                batch_first=True
+            )
+            self.seq_output_dim = self.seq_hidden_size * 2
+        '''
+        self.audio_embedding_pooling = GatedAttentionPoolingLayer(
+            embed_dim=self.seq_output_dim,
+            attn_dim=self.seq_output_dim // 2,   # opzionale: un collo di bottiglia
+            return_weights=False                  # metti True se vuoi pesi per interpretabilità
+        )
+        '''
+        self.audio_embedding_pooling = MeanPoolingLayer()
 
         self.audio_embedding_dim = self.seq_output_dim
 
@@ -85,12 +100,6 @@ class SSLModel(nn.Module):
             if 'weight' in name and len(param.shape) > 1:
                 nn.init.xavier_normal_(param)
             elif 'bias' in name:
-                nn.init.constant_(param, 0)
-
-        for name, param in self.audio_embedding_pooling.named_parameters():
-            if "weight" in name:
-                nn.init.xavier_normal_(param)
-            elif "bias" in name:
                 nn.init.constant_(param, 0)
     
     def forward(self, batch):
@@ -146,6 +155,16 @@ class SSLModel(nn.Module):
         # Process the sequence of segment embeddings for each audio file.
         if self.seq_model_type == 'transformer':
             sequence_output = self.sequence_model(projected_embeddings, src_key_padding_mask=chunk_padding_mask)  # (bs, T, H)
+        elif self.seq_model_type == 'lstm':
+            lengths = (~chunk_padding_mask).sum(dim=1).clamp(min=1)  # (bs,)
+            # pack richiede le lunghezze su CPU
+            packed = nn.utils.rnn.pack_padded_sequence(
+                projected_embeddings, lengths.cpu(), batch_first=True, enforce_sorted=False
+            )
+            packed_output, _ = self.sequence_model(packed)
+            sequence_output, _ = nn.utils.rnn.pad_packed_sequence(
+                packed_output, batch_first=True, total_length=projected_embeddings.size(1)
+            )  # (bs, T, H or H*2)
 
         # Pool segment-level outputs to get a single audio-level representation
         audio_embeddings = self.audio_embedding_pooling(sequence_output, mask=chunk_padding_mask)  # (bs, audio_embedding_dim)

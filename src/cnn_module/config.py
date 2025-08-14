@@ -1,5 +1,6 @@
 class CNNConfig:
     def __init__(self):
+        self.use_comet = False
         self.edaic_aug = False
         self.seed = 42
         self.k_folds = 1

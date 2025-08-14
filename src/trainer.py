@@ -76,7 +76,8 @@ class Trainer():
         return avg_loss, metrics['accuracy'], metrics['f1_macro'], metrics['f1_depression']
 
     def train(self, experiment, model_filename):
-        experiment.set_model_graph(self.model)
+        if experiment:
+            experiment.set_model_graph(self.model)
 
         early_stopping = EarlyStopping(
             patience = self.config.early_stopping_patience,
@@ -103,12 +104,13 @@ class Trainer():
             val_loss, val_acc, val_f1_macro, val_f1_depression = self.validate_epoch()
             print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | " + \
                   f"Val Acc: {val_acc:.4f} | Val F1 Macro: {val_f1_macro:.4f} | Val F1 Depression: {val_f1_depression:.4f}")
-
-            experiment.log_metric("train/loss", train_loss, step=epoch)
-            experiment.log_metric("val/loss", val_loss, step=epoch)
-            experiment.log_metric("val/accuracy", val_acc, step=epoch)
-            experiment.log_metric("val/f1_macro", val_f1_macro, step=epoch)
-            experiment.log_metric("val/f1_depression", val_f1_depression, step=epoch)
+            
+            if experiment:
+                experiment.log_metric("train/loss", train_loss, step=epoch)
+                experiment.log_metric("val/loss", val_loss, step=epoch)
+                experiment.log_metric("val/accuracy", val_acc, step=epoch)
+                experiment.log_metric("val/f1_macro", val_f1_macro, step=epoch)
+                experiment.log_metric("val/f1_depression", val_f1_depression, step=epoch)
 
             if self.scheduler_step == 'epoch': self.scheduler.step(val_f1_macro)
 

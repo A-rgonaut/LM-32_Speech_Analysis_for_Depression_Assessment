@@ -2,17 +2,38 @@ import random
 from torch.utils.data import Sampler
 
 class BalancedParticipantSampler(Sampler):
-    def __init__(self, positive_chunks_by_pid, negative_chunks_by_pid, batch_size):
-        self.positive_chunks_map = positive_chunks_by_pid
-        self.negative_chunks_map = negative_chunks_by_pid
-        self.batch_size = batch_size
+    def __init__(self, dataset):
+        participant_info_fold = dataset.participant_info
+        
+        self.positive_chunks_by_pid = {}
+        self.negative_chunks_by_pid = {}
+        for pid, info in participant_info_fold.items():
+            total_segments = info.get('total_segments', 0)
+            chunk_size = dataset.config.chunk_segments
+            
+            overlap = dataset.config.chunk_overlap_segments
+            step = chunk_size - overlap
+
+            participant_chunks = []
+            for start_idx in range(0, total_segments, step):
+                    if start_idx < total_segments:
+                        participant_chunks.append({'participant_id': pid, 'start_index': start_idx})
+
+            if info['label'] == 1:
+                self.positive_chunks_by_pid[pid] = participant_chunks
+            else:
+                self.negative_chunks_by_pid[pid] = participant_chunks
+        
+        print(f"Sampler data prepared for this fold: {len(self.positive_chunks_by_pid)} pos participants, {len(self.negative_chunks_by_pid)} neg participants.")
+
+        self.batch_size = dataset.config.batch_size
         self.oversample_factor = 1.0
 
         self.pos_per_batch = self.batch_size // 2
         self.neg_per_batch = self.batch_size - self.pos_per_batch
 
-        num_pos_chunks = sum(len(c) for c in self.positive_chunks_map.values())
-        num_neg_chunks = sum(len(c) for c in self.negative_chunks_map.values())
+        num_pos_chunks = sum(len(c) for c in self.positive_chunks_by_pid.values())
+        num_neg_chunks = sum(len(c) for c in self.negative_chunks_by_pid.values())
 
         if num_pos_chunks >= num_neg_chunks:
             self.majority_class_is_positive = True
@@ -26,13 +47,13 @@ class BalancedParticipantSampler(Sampler):
 
     def __iter__(self):
         if self.majority_class_is_positive:
-            majority_map = self.positive_chunks_map
-            minority_map = self.negative_chunks_map
+            majority_map = self.positive_chunks_by_pid
+            minority_map = self.negative_chunks_by_pid
             maj_per_batch = self.pos_per_batch
             min_per_batch = self.neg_per_batch
         else:
-            majority_map = self.negative_chunks_map
-            minority_map = self.positive_chunks_map
+            majority_map = self.negative_chunks_by_pid
+            minority_map = self.positive_chunks_by_pid
             maj_per_batch = self.neg_per_batch
             min_per_batch = self.pos_per_batch
 

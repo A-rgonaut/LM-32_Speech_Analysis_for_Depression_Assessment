@@ -10,15 +10,16 @@ from src.trainer import Trainer
 from src.utils import set_seed, clear_cache
 
 def main():
-    load_dotenv()
-    experiment = Experiment(
-        api_key = os.getenv("COMET_API_KEY"),
-        project_name = os.getenv("COMET_PROJECT_NAME"),
-        workspace = os.getenv("COMET_WORKSPACE")
-    )
-
     config = SSLConfig()
     set_seed(config.seed)
+    experiment = None
+    if config.use_comet:
+        load_dotenv()
+        experiment = Experiment(
+            api_key = os.getenv("COMET_API_KEY"),
+            project_name = os.getenv("COMET_PROJECT_NAME"),
+            workspace = os.getenv("COMET_WORKSPACE")
+        )
 
     data_loader = DataLoader(config)
 
@@ -63,8 +64,11 @@ def main():
             print(f"  Trainable parameters: {trainable_params/1e6:.2f}M")
 
         trainer = Trainer(model, train_loader, val_loader, config)
-        with experiment.context_manager(f"fold_{fold+1}"):
-            trainer.train(experiment, f'ssl_model_fold_{fold + 1}.pth')
+        if experiment:
+            with experiment.context_manager(f"fold_{fold+1}"):
+                trainer.train(experiment, f'ssl_model_fold_{fold + 1}.pth')
+        else:
+            trainer.train(None, f'ssl_model_fold_{fold + 1}.pth')
         clear_cache()
         
     print("\nK-Fold training complete. All models have been saved.")
