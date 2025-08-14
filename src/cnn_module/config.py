@@ -4,7 +4,7 @@ class CNNConfig:
         self.edaic_aug = False
         self.seed = 42
         self.k_folds = 1
-        self.balance_segments = False
+        self.balance_segments = True
         self.eval_strategy = 'majority'
         self.segmentation_strategy = 'fixed_length' # 'fixed_length' or 'transcript'
         

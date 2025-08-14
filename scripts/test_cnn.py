@@ -10,10 +10,10 @@ def main():
     test_loader = data_loader.get_data_loader('test')
     dev_loader = data_loader.get_data_loader('dev')
     
-    evaluator = Evaluator(dev_loader, config, 'cnn')
+    evaluator = Evaluator(config, 'cnn', dev_loader)
     evaluator.evaluate('dev')
 
-    evaluator = Evaluator(test_loader, config, 'cnn')
+    evaluator = Evaluator(config, 'cnn', test_loader)
     evaluator.evaluate('test')
 
 if __name__ == "__main__":

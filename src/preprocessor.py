@@ -90,7 +90,7 @@ class E1_DAIC():
 
         return df
 
-    def clean_transcription_df(df):
+    def clean_transcription_df(self, df):
         if 'speaker' in df: df.drop(columns=['speaker'], inplace=True)
         if 'Confidence' in df: df.drop(columns=['Confidence'], inplace=True)
         if 'Text' in df: df.rename(columns={'Text': 'value'}, inplace=True)
