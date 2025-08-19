@@ -15,9 +15,9 @@ class FeatureExtractor:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
 
-        print(f"Loading model: {config.model_name}")
-        self.model = AutoModel.from_pretrained(config.model_name, output_hidden_states=True).to(self.device)
-        self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name, do_normalize=False)
+        print(f"Loading model: {config.ssl_model_name}")
+        self.model = AutoModel.from_pretrained(config.ssl_model_name, output_hidden_states=True).to(self.device)
+        self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.ssl_model_name, do_normalize=True)
         self.mean_pooling = MeanPoolingLayer().to(self.device)
         self.model.eval() 
 

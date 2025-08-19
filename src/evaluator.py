@@ -4,23 +4,26 @@ import torch
 from collections import defaultdict
 from sklearn.metrics import confusion_matrix, classification_report
 
-from .ssl_module.model import SSLModel
+from .svm_module.model import SVMModel
 from .cnn_module.model import CNNModel
+from .ssl_module.model import SSLModel
+from .ssl_module_2.model import SSLModel2
 from .utils import clear_cache, get_metrics, aggregate_predictions, get_predictions
 
 class Evaluator:
-    def __init__(self, config, model_type, test_data, model=None):
+    def __init__(self, config, test_data):
         self.config = config
-        self.model_type = model_type
+        self.model_type = config.active_model
         self.test_data = test_data
-        self.model = model
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def evaluate(self, eval_type: str, feature_type: str = None):
-        if self.model_type in ['ssl', 'cnn']:
+        if self.model_type in ['ssl', 'cnn', 'ssl2']:
             self._evaluate_pytorch(eval_type)
         elif self.model_type == 'svm':
-            self._evaluate_sklearn(eval_type, feature_type)
+            model = SVMModel(self.config)
+            model = model.load_model(feature_type)
+            self._evaluate_sklearn(eval_type, feature_type, model)
 
     def _evaluate_pytorch(self, eval_type: str):
         test_loader = self.test_data
@@ -34,6 +37,8 @@ class Evaluator:
                 model = SSLModel(self.config)
             elif self.model_type == 'cnn':
                 model = CNNModel(self.config)
+            elif self.model_type == 'ssl2':
+                model = SSLModel2(self.config)
 
             model.load_state_dict(torch.load(path, map_location=self.device, weights_only=True))
             model.to(self.device)
@@ -86,11 +91,11 @@ class Evaluator:
         self._save_results(df_metrics, f'{eval_type}_results.csv')
         #'''
 
-    def _evaluate_sklearn(self, eval_type: str, feature_type: str):
+    def _evaluate_sklearn(self, eval_type: str, feature_type: str, model):
         test_X, test_y = self.test_data
 
-        pred_y = self.model.predict(test_X)
-        pred_scores = self.model.predict_proba(test_X)[:, 1]
+        pred_y = model.predict(test_X)
+        pred_scores = model.predict_proba(test_X)[:, 1]
 
         metrics = get_metrics(test_y, pred_y, 'accuracy', 'f1_macro', 'roc_auc',
                                 'sensitivity', 'specificity', 'f1_depression', y_score=pred_scores)

@@ -6,10 +6,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 
-from .config import SVMConfig
 
 class SVMModel:
-    def __init__(self, config: SVMConfig):
+    def __init__(self, config):
         self.model = None
         self.config = config
         self.kfold = StratifiedGroupKFold(n_splits=self.config.k_folds, shuffle=True, random_state=self.config.seed)

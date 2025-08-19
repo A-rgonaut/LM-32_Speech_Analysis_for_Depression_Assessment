@@ -4,23 +4,22 @@ import pandas as pd
 from torch.utils.data import Dataset as TorchDataset, DataLoader as TorchDataLoader
 from transformers import AutoFeatureExtractor
 
-from .config import SSLConfig
 from .sampler import BalancedParticipantSampler
 from ..utils import get_splits, filter_edaic_samples
 from ..audio_utils import load_audio, segment_audio_by_transcript, segment_audio_sliding_window
 from ..preprocessor import E1_DAIC
 
 class Dataset(TorchDataset):
-    def __init__(self, config : SSLConfig, participant_info: dict, is_train: bool = False):
+    def __init__(self, config, participant_info: dict, is_train: bool = False):
         self.config = config
         self.participant_info = participant_info
         self.is_train = is_train
 
         if not config.use_preextracted_features:
-            self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.model_name, do_normalize=False)
+            self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.ssl_model_name, do_normalize=True)
 
         self.indexable_items = []
-        if self.is_train and self.config.use_random_chunking:
+        if self.is_train and self.config.balance_train_set:
             # In training, il sampler lavora con gli ID, quindi la lista è solo di ID.
             self.indexable_items = list(self.participant_info.keys())
         else:
@@ -35,12 +34,12 @@ class Dataset(TorchDataset):
                     self.indexable_items.append({'participant_id': pid, 'start_index': start_idx})
 
     def __len__(self):
-        if self.is_train:
+        if self.is_train and self.config.balance_train_set:
             return len(self.participant_info)
         return len(self.indexable_items)
 
     def __getitem__(self, idx):
-        if self.is_train and self.config.use_random_chunking:
+        if self.is_train and self.config.balance_train_set:
             # 'idx' qui è un dizionario dal sampler {'id':..., 'start':...}
             participant_id = idx['participant_id']
             start_index = idx['start_index']
@@ -159,7 +158,7 @@ def collate_fn(batch):
         }
 
 class DataLoader():
-    def __init__(self, config : SSLConfig = SSLConfig()):
+    def __init__(self, config):
         self.config = config
         self.preprocessor = E1_DAIC(config.daic_path, config.e_daic_path, config.e1_daic_path)
         self.splits_df = self.preprocessor.get_dataset_splits()
@@ -237,7 +236,7 @@ class DataLoader():
 
         is_train = split == 'train'
         
-        if is_train and self.config.use_random_chunking:
+        if is_train and self.config.balance_train_set:
             sampler = BalancedParticipantSampler(dataset)
             return TorchDataLoader(
                 dataset,

@@ -1,0 +1,82 @@
+common:
+  active_model: 'ssl2' # 'svm', 'cnn', 'ssl', 'ssl2', model to train/test
+  use_comet: false
+  edaic_aug: false
+  seed: 42
+  sample_rate: 16000
+  k_folds: 1
+
+  daic_path: 'datasets/DAIC-WOZ/'
+  e_daic_path: 'datasets/E-DAIC-WOZ/'
+  e1_daic_path: 'datasets/E1-DAIC-WOZ/'
+  model_save_dir: "saved_models/"
+  result_dir: "results/"
+
+  eval_strategy: 'majority'
+  segmentation_strategy: 'fixed_length'
+  balance_train_set: true
+
+  early_stopping_patience: 5
+  early_stopping_min_delta: 0.01
+  early_stopping_mode: 'max'
+
+cnn:
+  max_utt_seconds: 3.0
+  min_utt_seconds: 0.5
+  overlap_seconds: 1.5
+
+  dropout_rate: 0.2
+
+  gradient_accumulation_steps: 1
+  epochs: 20
+  batch_size: 32
+  learning_rate: 0.001
+
+ssl:
+  max_utt_seconds: 10.0
+  min_utt_seconds: 1.0
+  overlap_seconds: 0.0
+  chunk_segments: 10
+  chunk_overlap_segments: 0
+
+  use_preextracted_features: true
+  layer_to_use: 8
+  ssl_model_name: 'facebook/wav2vec2-base-960h'
+
+  dropout_rate: 0.1
+  feature_path: "features/facebook/wav2vec2-base-960h/"
+  seq_model_type: 'transformer'
+  seq_hidden_size: 128
+  seq_num_layers: 2
+  transformer_nhead: 4
+
+  gradient_accumulation_steps: 1
+  epochs: 20
+  batch_size: 16
+  learning_rate: 0.00001
+
+ssl2:
+  max_utt_seconds: 10.0
+  min_utt_seconds: 0.5
+  overlap_seconds: 0.0
+
+  classifier_size: 768
+  layer_to_use: 8
+  num_layers_to_unfreeze: 0 # -1 means unfreeze all layers
+  aggregate_layers: false
+  ssl_model_name: 'facebook/wav2vec2-base-960h'
+
+  dropout_rate: 0.3
+
+  gradient_accumulation_steps: 1
+  epochs: 20
+  batch_size: 32
+  learning_rate: 0.001
+  
+svm:
+  feature_types: ['articulation', 'phonation', 'prosody', 'combined']
+  strategy: 'mean'
+  kernel: ['rbf', 'linear']
+  class_weight: ['balanced', null]
+  C: [0.001, 0.01, 0.1, 1, 10, 100, 1000]
+  gamma: [0.0001, 0.001, 0.01, 0.1, 1, 'scale', 'auto']

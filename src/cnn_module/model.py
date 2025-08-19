@@ -1,9 +1,7 @@
 from torch import nn
 
-from .config import CNNConfig
-
 class CNNModel(nn.Module):
-    def __init__(self, config: CNNConfig):
+    def __init__(self, config):
         super(CNNModel, self).__init__()
         self.config = config
         

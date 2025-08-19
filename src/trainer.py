@@ -5,7 +5,6 @@ from transformers import get_linear_schedule_with_warmup
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import os
 
-from .cnn_module.config import CNNConfig
 from .utils import EarlyStopping, get_metrics, get_predictions, aggregate_predictions
 
 class Trainer():
@@ -15,10 +14,8 @@ class Trainer():
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=config.learning_rate, weight_decay=0.01)
-        self.model_name = 'ssl'
         self.scheduler_step = ''
-        if isinstance(config, CNNConfig):
-            self.model_name = 'cnn'
+        self.model_name = config.active_model 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.criterion = nn.BCEWithLogitsLoss() 
         self.model.to(self.device)

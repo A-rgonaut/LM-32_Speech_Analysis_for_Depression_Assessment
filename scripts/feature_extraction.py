@@ -1,4 +1,4 @@
-from src.ssl_module.config import SSLConfig
+from src.config_loader import load_config
 from src.preprocessor import E1_DAIC
 from src.utils import get_splits, filter_edaic_samples, set_seed
 from src.ssl_module.feature_extractor import FeatureExtractor
@@ -6,7 +6,7 @@ from src.ssl_module.feature_extractor import FeatureExtractor
 def main():
     print("Starting feature extraction process...")
     
-    config = SSLConfig()
+    config = load_config()
     set_seed(config.seed)  
     preprocessor = E1_DAIC(config.daic_path, config.e_daic_path, config.e1_daic_path)
     splits = preprocessor.get_dataset_splits()

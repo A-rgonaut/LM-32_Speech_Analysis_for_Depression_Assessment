@@ -2,18 +2,16 @@ import torch
 from torch import nn
 from transformers import AutoModel, AutoConfig
 
-from .config import SSLConfig
 from ..pooling_layers import AttentionPoolingLayer, MeanPoolingLayer, GatedAttentionPoolingLayer
 
 class SSLModel(nn.Module):
-    def __init__(self, config: SSLConfig):
+    def __init__(self, config):
         super(SSLModel, self).__init__()
 
         # SSL model loading & config
         self.use_preextracted_features = config.use_preextracted_features
         if not self.use_preextracted_features:
-            self.aggregate_layers = config.aggregate_layers
-            self.ssl_model = AutoModel.from_pretrained(config.model_name, output_hidden_states=self.aggregate_layers)
+            self.ssl_model = AutoModel.from_pretrained(config.ssl_model_name, output_hidden_states=False)
             self.ssl_hidden_size = self.ssl_model.config.hidden_size
 
             self.num_encoder_layers_to_use = config.layer_to_use
@@ -26,24 +24,11 @@ class SSLModel(nn.Module):
             # Freeze SSL weights 
             for param in self.ssl_model.parameters():
                 param.requires_grad = False
-            
-            if self.aggregate_layers:
-                # Weighted sum of SSL model's hidden layers
-                num_ssl_layers = self.ssl_model.config.num_hidden_layers
-                layers_to_aggregate = num_ssl_layers + 1 # +1 for the initial embeddings
-
-                self.layer_weights = nn.Parameter(torch.ones(layers_to_aggregate))
-                self.layer_weights.requires_grad = True
-                self.layer_norms = nn.ModuleList(
-                    [nn.LayerNorm(self.ssl_hidden_size) for _ in range(layers_to_aggregate)]
-                )
-                self.layer_norms.requires_grad = True
-                self.softmax = nn.Softmax(dim=-1)
                 
             self.segment_embeddings_pooling = AttentionPoolingLayer(embed_dim=self.ssl_hidden_size)
             #self.segment_embeddings_pooling = MeanPoolingLayer()
 
-        ssl_config = AutoConfig.from_pretrained(config.model_name)
+        ssl_config = AutoConfig.from_pretrained(config.ssl_model_name)
         self.ssl_hidden_size = ssl_config.hidden_size
 
         # Segment-level pooling
@@ -78,14 +63,14 @@ class SSLModel(nn.Module):
                 batch_first=True
             )
             self.seq_output_dim = self.seq_hidden_size * 2
-        '''
+
         self.audio_embedding_pooling = GatedAttentionPoolingLayer(
             embed_dim=self.seq_output_dim,
-            attn_dim=self.seq_output_dim // 2,   # opzionale: un collo di bottiglia
-            return_weights=False                  # metti True se vuoi pesi per interpretabilità
+            attn_dim=self.seq_output_dim // 2,
+            return_weights=False
         )
-        '''
-        self.audio_embedding_pooling = MeanPoolingLayer()
+
+        #self.audio_embedding_pooling = MeanPoolingLayer()
 
         self.audio_embedding_dim = self.seq_output_dim
 
@@ -119,26 +104,13 @@ class SSLModel(nn.Module):
             input_values = input_values.view(batch_size * num_segments, -1)
 
             with torch.no_grad():
-                outputs = self.ssl_model(
+                ssl_hidden_state = self.ssl_model(
                     input_values=input_values,
                     attention_mask=attention_mask_segment,
                     return_dict=True,
-                )
+                ).last_hidden_state  # (bs * num_segments, num_frames, hidden_size)
 
-            if self.aggregate_layers:
-                ssl_hidden_states = outputs.hidden_states
-                # Combine all hidden layers from the SSL model using learned weights.
-                ssl_hidden_state = torch.zeros_like(ssl_hidden_states[-1])  # (bs * num_segments, num_frames, hidden_size)
-                weights = self.softmax(self.layer_weights)
-                for i in range(len(ssl_hidden_states)):
-                    ssl_hidden_state += weights[i] * self.layer_norms[i](ssl_hidden_states[i])
-            else:
-                ssl_hidden_state = outputs.last_hidden_state  # (bs * num_segments, num_frames, hidden_size)
-
-            frame_mask = self.ssl_model._get_feature_vector_attention_mask(
-                ssl_hidden_state[0].shape[1] if self.aggregate_layers else ssl_hidden_state.shape[1], 
-                attention_mask_segment
-            ) # (bs * num_segments, num_frames)
+            frame_mask = self.ssl_model._get_feature_vector_attention_mask(ssl_hidden_state.shape[1], attention_mask_segment) # (bs * num_segments, num_frames)
 
             pooling_mask = (frame_mask == 0)
             # Pool the sequence of frames into a single representation for the whole segment.
@@ -157,7 +129,6 @@ class SSLModel(nn.Module):
             sequence_output = self.sequence_model(projected_embeddings, src_key_padding_mask=chunk_padding_mask)  # (bs, T, H)
         elif self.seq_model_type == 'lstm':
             lengths = (~chunk_padding_mask).sum(dim=1).clamp(min=1)  # (bs,)
-            # pack richiede le lunghezze su CPU
             packed = nn.utils.rnn.pack_padded_sequence(
                 projected_embeddings, lengths.cpu(), batch_first=True, enforce_sorted=False
             )
@@ -165,6 +136,7 @@ class SSLModel(nn.Module):
             sequence_output, _ = nn.utils.rnn.pad_packed_sequence(
                 packed_output, batch_first=True, total_length=projected_embeddings.size(1)
             )  # (bs, T, H or H*2)
+
 
         # Pool segment-level outputs to get a single audio-level representation
         audio_embeddings = self.audio_embedding_pooling(sequence_output, mask=chunk_padding_mask)  # (bs, audio_embedding_dim)

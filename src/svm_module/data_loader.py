@@ -4,12 +4,11 @@ from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
 
 from .utils import process_interview
-from .config import SVMConfig
 from ..preprocessor import E1_DAIC
 from  ..utils import filter_edaic_samples
 
 class DataLoader:
-    def __init__(self, config: SVMConfig):
+    def __init__(self, config):
         self.config = config
         self.preprocessor = E1_DAIC(config.daic_path, config.e_daic_path, config.e1_daic_path)
         self.splits = self.preprocessor.get_dataset_splits()

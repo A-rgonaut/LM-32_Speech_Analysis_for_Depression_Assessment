@@ -1,8 +1,8 @@
 import os
 import torch
-import torch.nn.functional as F
 import pandas as pd
 from torch.utils.data import Dataset as TorchDataset, DataLoader as TorchDataLoader
+from transformers import AutoFeatureExtractor
 
 from ..utils import get_splits, filter_edaic_samples
 from ..audio_utils import load_audio, segment_audio_by_transcript, segment_audio_sliding_window
@@ -17,6 +17,7 @@ class Dataset(TorchDataset):
         self.max_utt_seconds = config.max_utt_seconds
         self.min_utt_seconds = config.min_utt_seconds
         self.overlap_seconds = config.overlap_seconds
+        self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.ssl_model_name, do_normalize=True)
         self.id_to_label = {os.path.basename(path).replace('_AUDIO.wav', ''): label for path, label in zip(audio_paths, labels)}
         self.id_to_path = {os.path.basename(path).replace('_AUDIO.wav', ''): path for path in audio_paths}
 
@@ -46,7 +47,6 @@ class Dataset(TorchDataset):
                     max_utt_seconds=self.max_utt_seconds,
                     overlap_seconds=self.overlap_seconds,
                     min_utt_seconds=self.min_utt_seconds,
-                    fullness_threshold=1,
                     return_indices=True
                 )
             self.segments.extend([(audio_id, seg[0], seg[1]) for seg in audio_segments_indices])
@@ -64,22 +64,23 @@ class Dataset(TorchDataset):
             sample_rate=self.sample_rate,
             offset_samples=start_sample,
             duration_samples=end_sample - start_sample
+        
         )
-        segment = torch.tensor(segment, dtype=torch.float32)
-
         target_length = int(self.max_utt_seconds * self.sample_rate)
-        current_length = len(segment)
 
-        if current_length > target_length:
-            # Truncate the segment to the target length
-            segment = segment[:target_length]
-        elif current_length < target_length:
-            # Pad the segment to the target length
-            padding_needed = target_length - current_length
-            segment = F.pad(segment, (0, padding_needed))
+        features = self.feature_extractor(
+            [segment], 
+            sampling_rate=self.config.sample_rate,
+            max_length=target_length,
+            padding='max_length',
+            truncation=True,
+            return_tensors='pt',
+            return_attention_mask=True,
+        )
 
         return {
-            'input_values': segment,
+            'input_values': features['input_values'].squeeze(0),
+            'attention_mask_segment': features['attention_mask'].squeeze(0),
             'label': torch.tensor(label, dtype=torch.float32),
             'audio_id': torch.tensor(int(id), dtype=torch.long)
         }
