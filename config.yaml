@@ -1,10 +1,10 @@
 common:
-  active_model: 'ssl' # 'svm', 'cnn', 'ssl', 'ssl2', model to train/test
+  active_model: 'ssl' # 'svm', 'cnn', 'ssl', model to train/test
   use_comet: false
   edaic_aug: false
   seed: 42
   sample_rate: 16000
-  k_folds: 10
+  k_folds: 1
 
   daic_path: 'datasets/DAIC-WOZ/'
   e_daic_path: 'datasets/E-DAIC-WOZ/'
@@ -21,9 +21,9 @@ common:
   early_stopping_mode: 'max'
 
 cnn:
-  max_utt_seconds: 10.0
+  max_utt_seconds: 3.0
   min_utt_seconds: 0.1
-  overlap_seconds: 2.5
+  overlap_seconds: 1.5
 
   dropout_rate: 0.2
 
@@ -54,24 +54,6 @@ ssl:
   epochs: 20
   batch_size: 16
   learning_rate: 0.00001
-
-ssl2:
-  max_utt_seconds: 10.0
-  min_utt_seconds: 0.5
-  overlap_seconds: 0.0
-
-  classifier_size: 768
-  layer_to_use: 8
-  num_layers_to_unfreeze: 0 # -1 means unfreeze all layers
-  aggregate_layers: false
-  ssl_model_name: 'facebook/wav2vec2-base-960h'
-
-  dropout_rate: 0.3
-
-  gradient_accumulation_steps: 1
-  epochs: 20
-  batch_size: 32
-  learning_rate: 0.001
   
 svm:
   feature_types: ['articulation', 'phonation', 'prosody', 'combined']

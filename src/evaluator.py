@@ -7,7 +7,6 @@ from sklearn.metrics import confusion_matrix, classification_report
 from .svm_module.model import SVMModel
 from .cnn_module.model import CNNModel
 from .ssl_module.model import SSLModel
-from .ssl_module_2.model import SSLModel2
 from .utils import clear_cache, get_metrics, aggregate_predictions, get_predictions
 
 class Evaluator:
@@ -18,7 +17,7 @@ class Evaluator:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def evaluate(self, eval_type: str, feature_type: str = None):
-        if self.model_type in ['ssl', 'cnn', 'ssl2']:
+        if self.model_type in ['ssl', 'cnn']:
             self._evaluate_pytorch(eval_type)
         elif self.model_type == 'svm':
             model = SVMModel(self.config)
@@ -37,8 +36,6 @@ class Evaluator:
                 model = SSLModel(self.config)
             elif self.model_type == 'cnn':
                 model = CNNModel(self.config)
-            elif self.model_type == 'ssl2':
-                model = SSLModel2(self.config)
 
             model.load_state_dict(torch.load(path, map_location=self.device, weights_only=True))
             model.to(self.device)

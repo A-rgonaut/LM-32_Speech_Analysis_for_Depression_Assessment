@@ -53,9 +53,6 @@ def _train_pytorch_segment_cv(config, experiment):
     if model_name == 'cnn':
         from src.cnn_module.data_loader import DataLoader
         from src.cnn_module.model import CNNModel as Model
-    elif model_name == 'ssl2':
-        from src.ssl_module_2.data_loader import DataLoader
-        from src.ssl_module_2.model import SSLModel2 as Model
 
     data_loader = DataLoader(config)
     train_dataset = data_loader.get_dataset('train')
@@ -196,7 +193,7 @@ def main():
 
     if config.active_model == 'svm':
         _train_svm(config)
-    elif config.active_model in ['cnn', 'ssl2']:
+    elif config.active_model == 'cnn':
         _train_pytorch_segment_cv(config, experiment)
     elif config.active_model == 'ssl':
         _train_pytorch_participant_cv(config, experiment)

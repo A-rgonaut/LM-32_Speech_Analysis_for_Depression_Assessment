@@ -36,7 +36,7 @@ pip install -r requirements.txt
 ```
 
 ### 1. Experiment Configuration
-Before running any script, modify the `config.yaml` file. The `common.active_model` key determines which model will be used (`'svm'`, `'cnn'`, `'ssl'`, or `'ssl2'`). All other model-specific parameters are defined in their respective sections.
+Before running any script, modify the `config.yaml` file. The `common.active_model` key determines which model will be used (`'svm'`, `'cnn'`, `'ssl'`). All other model-specific parameters are defined in their respective sections.
 
 ### 2. Data Preprocessing (Run once)
 This script processes the raw datasets and generates the unified E1-DAIC-WOZ dataset required for training.
