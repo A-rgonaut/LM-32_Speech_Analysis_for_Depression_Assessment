@@ -57,16 +57,30 @@ class Dataset(TorchDataset):
         chunk_padding_mask = torch.zeros(chunk_size, dtype=torch.bool)
 
         if self.config.use_preextracted_features:
-            feature_filename = f"{participant_id}_AUDIO_layer_{self.config.layer_to_use}.pt"
-            feature_path = os.path.join(self.config.feature_path, feature_filename)
-            all_features = torch.load(feature_path, map_location='cpu', weights_only=True)
+            if self.config.use_all_layers:
+                layer_features_list = []
+                for layer_idx in range(self.config.num_ssl_layers):
+                    feature_filename = f"{participant_id}_AUDIO_layer_{layer_idx}.pt"
+                    feature_path = os.path.join(self.config.feature_path, feature_filename)
+                    # Carica le feature per il partecipante e le aggiunge alla lista
+                    layer_features = torch.load(feature_path, map_location='cpu', weights_only=True)
+                    layer_features_list.append(layer_features)
+                
+                # 'Impila' i tensori lungo una nuova dimensione (dim=1)
+                # Forma risultante per all_features: (num_total_segments, num_layers, hidden_size)
+                all_features = torch.stack(layer_features_list, dim=1)
+            else:
+                feature_filename = f"{participant_id}_AUDIO_layer_{self.config.layer_to_use}.pt"
+                feature_path = os.path.join(self.config.feature_path, feature_filename)
+                all_features = torch.load(feature_path, map_location='cpu', weights_only=True)
             feature_chunk = all_features[start_index:end_index]
 
             # Padding se l'ultimo chunk è più corto
             actual_len = feature_chunk.shape[0]
             if actual_len < chunk_size:
                 padding_size = chunk_size - actual_len
-                padding = torch.zeros((padding_size, feature_chunk.shape[1]), dtype=feature_chunk.dtype)
+                padding_shape = (padding_size,) + feature_chunk.shape[1:]
+                padding = torch.zeros(padding_shape, dtype=feature_chunk.dtype)
                 feature_chunk = torch.cat([feature_chunk, padding], dim=0)
                 chunk_padding_mask[actual_len:] = True
 
@@ -103,7 +117,7 @@ class Dataset(TorchDataset):
                 return_attention_mask=True,
             )
 
-            chunk_input_values = features['input_values']
+            chunk_input_values = features['input_features'] if 'whisper' in self.config.ssl_model_name.lower() else features['input_values']
             chunk_attention_masks = features['attention_mask']
             
             actual_len = chunk_input_values.shape[0]

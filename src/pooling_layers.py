@@ -5,7 +5,10 @@ class AttentionPoolingLayer(nn.Module):
     def __init__(self, embed_dim):
         super().__init__()
         self.linear = nn.Linear(embed_dim, 1)
-        
+
+        nn.init.xavier_uniform_(self.linear.weight)
+        nn.init.zeros_(self.linear.bias)
+
     def forward(self, x, mask=None):
         """
         Forward pass.

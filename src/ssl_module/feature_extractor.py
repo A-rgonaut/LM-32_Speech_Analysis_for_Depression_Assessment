@@ -17,6 +17,10 @@ class FeatureExtractor:
 
         print(f"Loading model: {config.ssl_model_name}")
         self.model = AutoModel.from_pretrained(config.ssl_model_name, output_hidden_states=True).to(self.device)
+        self.is_whisper = False
+        if 'whisper' in self.config.ssl_model_name.lower():
+            self.model = self.model.encoder
+            self.is_whisper = True
         self.feature_extractor = AutoFeatureExtractor.from_pretrained(config.ssl_model_name, do_normalize=True)
         self.mean_pooling = MeanPoolingLayer().to(self.device)
         self.model.eval() 
@@ -27,6 +31,11 @@ class FeatureExtractor:
         os.makedirs(output_dir, exist_ok=True)
         print(f"Saving features for '{split_name}' split in: {output_dir}")
         metadata = []
+
+        if self.is_whisper:
+            max_length_for_padding = 30 * self.sample_rate
+        else:
+            max_length_for_padding = self.segment_samples
 
         for audio_path in tqdm(audio_paths, desc=f"Extracting features for {split_name}"):
             # Build the output path
@@ -59,20 +68,32 @@ class FeatureExtractor:
                 inputs = self.feature_extractor(
                     batch_segments, 
                     sampling_rate=self.sample_rate, 
-                    return_tensors="pt", 
-                    max_length=self.segment_samples,
+                    return_tensors="pt",
                     padding='max_length',
+                    max_length=max_length_for_padding,
                     truncation=True,
                     return_attention_mask=True
                 )
             
-                # Move data to the correct device
-                input_values = inputs.input_values.to(self.device)
+                model_inputs = {}
+                if self.is_whisper:
+                    model_inputs['input_features'] = inputs.input_features.to(self.device)
+                else:
+                    model_inputs['input_values'] = inputs.input_values.to(self.device)
                 attention_mask = inputs.attention_mask.to(self.device)
+                model_inputs['attention_mask'] = attention_mask
                 
                 # Extract hidden states
-                hidden_states = self.model(input_values, attention_mask=attention_mask).hidden_states
-                frame_attention_mask = self.model._get_feature_vector_attention_mask(hidden_states[0].shape[1], attention_mask)
+                hidden_states = self.model(**model_inputs).hidden_states
+
+                if self.is_whisper:
+                    input_lengths = attention_mask.sum(-1)
+                    output_lengths = input_lengths // 2
+                    max_frames = hidden_states[0].shape[1]
+                    frame_indices = torch.arange(max_frames, device=self.device).expand(len(batch_segments), -1)
+                    frame_attention_mask = (frame_indices < output_lengths.unsqueeze(1)).long()
+                else:
+                    frame_attention_mask = self.model._get_feature_vector_attention_mask(hidden_states[0].shape[1], attention_mask)
 
                 for layer_idx, hidden_state_layer in enumerate(hidden_states): 
                     # hidden_state_layer has shape (batch_size, num_frames, hidden_size)

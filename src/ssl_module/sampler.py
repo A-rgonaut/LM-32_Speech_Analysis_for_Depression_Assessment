@@ -37,10 +37,10 @@ class BalancedParticipantSampler(Sampler):
 
         if num_pos_chunks >= num_neg_chunks:
             self.majority_class_is_positive = True
-            self.num_batches = int((num_neg_chunks / self.pos_per_batch) * self.oversample_factor)
+            self.num_batches = int((num_neg_chunks / self.neg_per_batch) * self.oversample_factor)
         else:
             self.majority_class_is_positive = False
-            self.num_batches = int((num_pos_chunks / self.neg_per_batch) * self.oversample_factor)
+            self.num_batches = int((num_pos_chunks / self.pos_per_batch) * self.oversample_factor)
 
         print(f"BalancedParticipantSampler created. It will generate {self.num_batches} batches per epoch.")
         print(f"Majority class is {'POSITIVE' if self.majority_class_is_positive else 'NEGATIVE'}.")

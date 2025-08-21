@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 from transformers import AutoModel, AutoConfig
 
 from ..pooling_layers import AttentionPoolingLayer, MeanPoolingLayer, GatedAttentionPoolingLayer
@@ -12,6 +13,9 @@ class SSLModel(nn.Module):
         self.use_preextracted_features = config.use_preextracted_features
         if not self.use_preextracted_features:
             self.ssl_model = AutoModel.from_pretrained(config.ssl_model_name, output_hidden_states=False)
+            if 'whisper' in self.config.ssl_model_name.lower():
+                self.ssl_model = self.ssl_model.encoder
+                self.is_whisper = True
             self.ssl_hidden_size = self.ssl_model.config.hidden_size
 
             self.num_encoder_layers_to_use = config.layer_to_use
@@ -24,15 +28,22 @@ class SSLModel(nn.Module):
             # Freeze SSL weights 
             for param in self.ssl_model.parameters():
                 param.requires_grad = False
-                
+            
+            # Segment-level pooling
             self.segment_embeddings_pooling = AttentionPoolingLayer(embed_dim=self.ssl_hidden_size)
             #self.segment_embeddings_pooling = MeanPoolingLayer()
 
         ssl_config = AutoConfig.from_pretrained(config.ssl_model_name)
         self.ssl_hidden_size = ssl_config.hidden_size
+        self.use_all_layers = config.use_all_layers
 
-        # Segment-level pooling
-        self.segment_embedding_dim = self.ssl_hidden_size 
+        if self.use_all_layers:
+            self.layer_weights = nn.Parameter(torch.zeros(config.num_ssl_layers))
+            self.layer_norms = nn.ModuleList(
+                [nn.LayerNorm(self.ssl_hidden_size) for _ in range(config.num_ssl_layers)]
+            )
+
+        self.segment_embedding_dim = self.ssl_hidden_size
 
         # Add a projection layer to reduce dimensionality
         self.projection = nn.Linear(self.segment_embedding_dim, config.seq_hidden_size)
@@ -64,12 +75,13 @@ class SSLModel(nn.Module):
             )
             self.seq_output_dim = self.seq_hidden_size * 2
 
+        #'''
         self.audio_embedding_pooling = GatedAttentionPoolingLayer(
             embed_dim=self.seq_output_dim,
             attn_dim=self.seq_output_dim // 2,
             return_weights=False
         )
-
+        #'''
         #self.audio_embedding_pooling = MeanPoolingLayer()
         #self.audio_embedding_pooling = AttentionPoolingLayer(embed_dim=self.seq_output_dim)
 
@@ -93,7 +105,29 @@ class SSLModel(nn.Module):
         chunk_padding_mask = batch.get('chunk_padding_mask', None) # (bs, num_segments)
 
         if self.use_preextracted_features:
-            segment_embeddings = batch['segment_features'] # (bs, num_segments, hidden_size)
+            segment_embeddings = batch['segment_features'] # (bs, num_segments, num_layers, hidden_size) or (bs, num_segments, hidden_size)
+
+            if self.use_all_layers:
+                # 1. Normalizza i pesi dei layer con softmax
+                normalized_weights = F.softmax(self.layer_weights, dim=-1)
+
+                # 2. Inizializza un tensore per l'output combinato
+                # Usiamo il primo layer (o un tensore di zeri) come base per la forma
+                weighted_sum_features = torch.zeros_like(segment_embeddings[:, :, 0, :])
+
+                # 3. Itera, applica LayerNorm, moltiplica per il peso e somma
+                for i in range(len(self.layer_norms)):
+                    # Estrae le feature del i-esimo layer: (bs, num_segments, hidden_size)
+                    layer_feat = segment_embeddings[:, :, i, :]
+                    
+                    # Applica la LayerNorm specifica per questo layer
+                    norm_feat = self.layer_norms[i](layer_feat)
+                    
+                    # Somma pesata
+                    weighted_sum_features += normalized_weights[i] * norm_feat
+                
+                segment_embeddings = weighted_sum_features
+                # La forma risultante è (bs, num_segments, hidden_size)
         else:
             input_values = batch['input_values'] # (bs, num_segments, seq_len)
             attention_mask_segment = batch['attention_mask_segment'] # (bs, num_segments, seq_len)
@@ -105,13 +139,21 @@ class SSLModel(nn.Module):
             input_values = input_values.view(batch_size * num_segments, -1)
 
             with torch.no_grad():
-                ssl_hidden_state = self.ssl_model(
+                outputs = self.ssl_model(
                     input_values=input_values,
                     attention_mask=attention_mask_segment,
                     return_dict=True,
-                ).last_hidden_state  # (bs * num_segments, num_frames, hidden_size)
+                )
+                
+                # Whisper
+                if hasattr(outputs, 'last_hidden_state_encoder') and outputs.last_hidden_state_encoder is not None:
+                     ssl_hidden_state = outputs.last_hidden_state_encoder
+                elif hasattr(outputs, 'encoder_last_hidden_state') and outputs.encoder_last_hidden_state is not None:
+                     ssl_hidden_state = outputs.encoder_last_hidden_state
+                else:
+                    ssl_hidden_state = outputs.last_hidden_state  # (bs * num_segments, num_frames, hidden_size)
 
-            frame_mask = self.ssl_model._get_feature_vector_attention_mask(ssl_hidden_state.shape[1], attention_mask_segment) # (bs * num_segments, num_frames)
+            frame_mask = self.ssl_model._get_feature_vector_attention_mask(ssl_hidden_state.shape[1], attention_mask_segment) # (bs * num_segments, num_frames)
 
             pooling_mask = (frame_mask == 0)
             # Pool the sequence of frames into a single representation for the whole segment.

@@ -21,16 +21,15 @@ common:
   early_stopping_mode: 'max'
 
 cnn:
-  max_utt_seconds: 3.0
+  max_utt_seconds: 10.0
   min_utt_seconds: 0.1
-  overlap_seconds: 1.5
+  overlap_seconds: 0.0
 
   dropout_rate: 0.2
-
   gradient_accumulation_steps: 1
   epochs: 20
   batch_size: 32
-  learning_rate: 0.001
+  learning_rate: 0.0001
 
 ssl:
   max_utt_seconds: 10.0
@@ -40,11 +39,15 @@ ssl:
   chunk_overlap_segments: 0
 
   use_preextracted_features: true
+  use_all_layers: false
   layer_to_use: 8
   ssl_model_name: 'facebook/wav2vec2-base-960h'
+  #ssl_model_name: "openai/whisper-small" 
+  #ssl_model_name: 'microsoft/wavlm-base'
+  #ssl_model_name: 'facebook/hubert-base-ls960'
 
   dropout_rate: 0.1
-  feature_path: "features/facebook/wav2vec2-base-960h/"
+  feature_path: "features/"
   seq_model_type: 'transformer'
   seq_hidden_size: 128
   seq_num_layers: 2
