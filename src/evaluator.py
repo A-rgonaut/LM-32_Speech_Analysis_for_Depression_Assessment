@@ -78,7 +78,7 @@ class Evaluator:
         self._save_results(summary_df, f'{eval_type}_results.csv')
         '''
         final_predictions, final_targets, final_scores = aggregate_predictions(
-            all_session_scores, all_se ssion_targets, self.config.eval_strategy
+            all_session_scores, all_session_targets, self.config.eval_strategy
         )
         metrics = get_metrics(final_targets, final_predictions, 'accuracy', 'f1_macro', 'roc_auc',
                               'sensitivity', 'specificity', 'f1_depression', y_score=final_scores)

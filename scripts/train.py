@@ -65,7 +65,7 @@ def _train_pytorch_segment_cv(config, experiment):
     segment_groups = [seg[0] for seg in train_dataset.segments]
     
     if config.k_folds == 1:
-        validation_split_fraction = 0.1
+        validation_split_fraction = 0.2
         n_splits_for_single_run = int(1 / validation_split_fraction)
         kfold = StratifiedGroupKFold(n_splits=n_splits_for_single_run, shuffle=True, random_state=config.seed)
     else:
@@ -137,7 +137,7 @@ def _train_pytorch_participant_cv(config, experiment):
     groups = participant_ids
 
     if config.k_folds == 1:
-        validation_split_fraction = 0.1
+        validation_split_fraction = 0.2
         n_splits_for_single_run = int(1 / validation_split_fraction)
         kfold = StratifiedGroupKFold(n_splits=n_splits_for_single_run, shuffle=True, random_state=config.seed)
     else:

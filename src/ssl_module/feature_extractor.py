@@ -48,31 +48,43 @@ class FeatureExtractor:
             num_segments = len(segments)
             metadata.append({'filename': filename, 'num_segments': num_segments})
 
-            # Prepare segments for the model
-            inputs = self.feature_extractor(
-                segments, 
-                sampling_rate=self.sample_rate, 
-                return_tensors="pt", 
-                max_length=self.segment_samples,
-                padding='max_length',
-                truncation=True,
-                return_attention_mask=True
-            )
-        
-            # Move data to the correct device
-            input_values = inputs.input_values.to(self.device)
-            attention_mask = inputs.attention_mask.to(self.device)
-            
-            # Extract hidden states
-            hidden_states = self.model(input_values, attention_mask=attention_mask).hidden_states
-            frame_attention_mask = self.model._get_feature_vector_attention_mask(hidden_states[0].shape[1], attention_mask)
+            all_pooled_outputs = [[] for _ in range(self.model.config.num_hidden_layers + 1)]
+            self.batch_size = 128
 
-            # Esegui il pooling per ogni layer
-            for i, hidden_state_layer in enumerate(hidden_states): 
-                # hidden_state_layer has shape (num_segments, num_frames, hidden_size)
-                pooling_mask = (frame_attention_mask == 0)
-                pooled_output = self.mean_pooling(hidden_state_layer, mask=pooling_mask) # (num_segments, hidden_size)
-                torch.save(pooled_output.cpu(), save_path.replace('.pt', f'_layer_{i}.pt'))
+            # Process segments in batches
+            for i in range(0, num_segments, self.batch_size):
+                batch_segments = segments[i:i+self.batch_size]
+
+                # Prepare segments for the model
+                inputs = self.feature_extractor(
+                    batch_segments, 
+                    sampling_rate=self.sample_rate, 
+                    return_tensors="pt", 
+                    max_length=self.segment_samples,
+                    padding='max_length',
+                    truncation=True,
+                    return_attention_mask=True
+                )
+            
+                # Move data to the correct device
+                input_values = inputs.input_values.to(self.device)
+                attention_mask = inputs.attention_mask.to(self.device)
+                
+                # Extract hidden states
+                hidden_states = self.model(input_values, attention_mask=attention_mask).hidden_states
+                frame_attention_mask = self.model._get_feature_vector_attention_mask(hidden_states[0].shape[1], attention_mask)
+
+                for layer_idx, hidden_state_layer in enumerate(hidden_states): 
+                    # hidden_state_layer has shape (batch_size, num_frames, hidden_size)
+                    pooling_mask = (frame_attention_mask == 0)
+                    pooled_output = self.mean_pooling(hidden_state_layer, mask=pooling_mask) # (batch_size, hidden_size)
+                    all_pooled_outputs[layer_idx].append(pooled_output.cpu())
+
+            # Concatenate results from all batches and save
+            for layer_idx, pooled_outputs in enumerate(all_pooled_outputs):
+                if pooled_outputs:
+                    final_tensor = torch.cat(pooled_outputs, dim=0)
+                    torch.save(final_tensor, save_path.replace('.pt', f'_layer_{layer_idx}.pt'))
         
         metadata_path = os.path.join(self.config.feature_path, f'{split_name}_metadata.csv')
         pd.DataFrame(metadata).to_csv(metadata_path, index=False)

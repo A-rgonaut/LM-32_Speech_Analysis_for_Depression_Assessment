@@ -53,7 +53,7 @@ class SSLModel(nn.Module):
             )
             self.sequence_model = nn.TransformerEncoder(encoder_layer, num_layers=self.num_layers)
             self.seq_output_dim = self.seq_hidden_size
-        elif self.seq_model_type == 'lstm':
+        elif self.seq_model_type == 'bilstm':
             self.sequence_model = nn.LSTM(
                 input_size=self.seq_hidden_size,
                 hidden_size=self.seq_hidden_size,
@@ -71,11 +71,12 @@ class SSLModel(nn.Module):
         )
 
         #self.audio_embedding_pooling = MeanPoolingLayer()
+        #self.audio_embedding_pooling = AttentionPoolingLayer(embed_dim=self.seq_output_dim)
 
         self.audio_embedding_dim = self.seq_output_dim
 
         self.classifier = nn.Sequential(
-            nn.Linear(self.audio_embedding_dim, 1)
+            nn.Linear(self.audio_embedding_dim, 1),
         )
 
         self.init_weights()
@@ -127,7 +128,7 @@ class SSLModel(nn.Module):
         # Process the sequence of segment embeddings for each audio file.
         if self.seq_model_type == 'transformer':
             sequence_output = self.sequence_model(projected_embeddings, src_key_padding_mask=chunk_padding_mask)  # (bs, T, H)
-        elif self.seq_model_type == 'lstm':
+        elif self.seq_model_type == 'bilstm':
             lengths = (~chunk_padding_mask).sum(dim=1).clamp(min=1)  # (bs,)
             packed = nn.utils.rnn.pack_padded_sequence(
                 projected_embeddings, lengths.cpu(), batch_first=True, enforce_sorted=False
@@ -136,7 +137,6 @@ class SSLModel(nn.Module):
             sequence_output, _ = nn.utils.rnn.pad_packed_sequence(
                 packed_output, batch_first=True, total_length=projected_embeddings.size(1)
             )  # (bs, T, H or H*2)
-
 
         # Pool segment-level outputs to get a single audio-level representation
         audio_embeddings = self.audio_embedding_pooling(sequence_output, mask=chunk_padding_mask)  # (bs, audio_embedding_dim)

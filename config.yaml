@@ -1,10 +1,10 @@
 common:
-  active_model: 'ssl2' # 'svm', 'cnn', 'ssl', 'ssl2', model to train/test
+  active_model: 'ssl' # 'svm', 'cnn', 'ssl', 'ssl2', model to train/test
   use_comet: false
   edaic_aug: false
   seed: 42
   sample_rate: 16000
-  k_folds: 1
+  k_folds: 10
 
   daic_path: 'datasets/DAIC-WOZ/'
   e_daic_path: 'datasets/E-DAIC-WOZ/'
@@ -13,7 +13,7 @@ common:
   result_dir: "results/"
 
   eval_strategy: 'majority'
-  segmentation_strategy: 'fixed_length'
+  segmentation_strategy: 'transcript'
   balance_train_set: true
 
   early_stopping_patience: 5
@@ -21,9 +21,9 @@ common:
   early_stopping_mode: 'max'
 
 cnn:
-  max_utt_seconds: 3.0
-  min_utt_seconds: 0.5
-  overlap_seconds: 1.5
+  max_utt_seconds: 10.0
+  min_utt_seconds: 0.1
+  overlap_seconds: 2.5
 
   dropout_rate: 0.2
 
@@ -34,7 +34,7 @@ cnn:
 
 ssl:
   max_utt_seconds: 10.0
-  min_utt_seconds: 1.0
+  min_utt_seconds: 0.1
   overlap_seconds: 0.0
   chunk_segments: 10
   chunk_overlap_segments: 0
