@@ -4,7 +4,7 @@ common:
   edaic_aug: false
   seed: 42
   sample_rate: 16000
-  k_folds: 1
+  k_folds: 5
 
   daic_path: 'datasets/DAIC-WOZ/'
   e_daic_path: 'datasets/E-DAIC-WOZ/'
@@ -19,24 +19,24 @@ common:
   early_stopping_patience: 5
   early_stopping_min_delta: 0.01
   early_stopping_mode: 'max'
-
-cnn:
-  max_utt_seconds: 10.0
-  min_utt_seconds: 0.1
-  overlap_seconds: 0.0
-
-  dropout_rate: 0.2
   gradient_accumulation_steps: 1
   epochs: 20
-  batch_size: 32
-  learning_rate: 0.0001
+
+cnn:
+  hyperparameter_search_mode: true
+  segmentation_strategy: ['transcript', 'fixed_length']
+  min_utt_seconds: 0.1
+  max_utt_seconds: [3.0, 5.0]
+  overlap_seconds: [1.5, 2.5]
+  batch_size: [32]
+  dropout_rate: [0.2, 0.3]
+  learning_rate: [0.0001, 0.00005]
 
 ssl:
+  hyperparameter_search_mode: true
   max_utt_seconds: 10.0
   min_utt_seconds: 0.1
   overlap_seconds: 0.0
-  chunk_segments: 10
-  chunk_overlap_segments: 0
 
   use_preextracted_features: true
   use_all_layers: false
@@ -45,18 +45,17 @@ ssl:
   #ssl_model_name: "openai/whisper-small" 
   #ssl_model_name: 'microsoft/wavlm-base'
   #ssl_model_name: 'facebook/hubert-base-ls960'
-
-  dropout_rate: 0.1
+  
   feature_path: "features/"
-  seq_model_type: 'transformer'
-  seq_hidden_size: 128
-  seq_num_layers: 2
-  transformer_nhead: 4
-
-  gradient_accumulation_steps: 1
-  epochs: 20
-  batch_size: 16
-  learning_rate: 0.00001
+  chunk_segments: [10, 5]
+  chunk_overlap_segments: [0, 2]
+  seq_model_type: ['transformer', 'bilstm']
+  seq_hidden_size: [128]
+  learning_rate: [0.0001, 0.00001]
+  dropout_rate: [0.1, 0.2]
+  seq_num_layers: [2]
+  transformer_nhead: [4]
+  batch_size: [16]
   
 svm:
   feature_types: ['articulation', 'phonation', 'prosody', 'combined']

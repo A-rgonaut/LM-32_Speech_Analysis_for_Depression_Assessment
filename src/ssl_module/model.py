@@ -11,16 +11,17 @@ class SSLModel(nn.Module):
 
         # SSL model loading & config
         self.use_preextracted_features = config.use_preextracted_features
+        self.use_all_layers = config.use_all_layers
         if not self.use_preextracted_features:
             self.ssl_model = AutoModel.from_pretrained(config.ssl_model_name, output_hidden_states=False)
-            if 'whisper' in self.config.ssl_model_name.lower():
+            if 'whisper' in config.ssl_model_name.lower():
                 self.ssl_model = self.ssl_model.encoder
                 self.is_whisper = True
             self.ssl_hidden_size = self.ssl_model.config.hidden_size
 
             self.num_encoder_layers_to_use = config.layer_to_use
-            
-            if self.num_encoder_layers_to_use is not None:
+
+            if self.num_encoder_layers_to_use is not None and not self.use_all_layers:
                 self.ssl_model.encoder.layers = self.ssl_model.encoder.layers[:self.num_encoder_layers_to_use]
                 self.ssl_model.config.num_hidden_layers = len(self.ssl_model.encoder.layers)
                 print(self.ssl_model.config.num_hidden_layers, "encoder layers will be used from the SSL model.")
@@ -30,12 +31,18 @@ class SSLModel(nn.Module):
                 param.requires_grad = False
             
             # Segment-level pooling
-            self.segment_embeddings_pooling = AttentionPoolingLayer(embed_dim=self.ssl_hidden_size)
+            #'''
+            self.segment_embeddings_pooling = GatedAttentionPoolingLayer(
+                embed_dim=self.ssl_hidden_size,
+                attn_dim=self.ssl_hidden_size // 2,
+                return_weights=False
+            )
+            #'''
+            #self.segment_embeddings_pooling = AttentionPoolingLayer(embed_dim=self.ssl_hidden_size)
             #self.segment_embeddings_pooling = MeanPoolingLayer()
 
         ssl_config = AutoConfig.from_pretrained(config.ssl_model_name)
         self.ssl_hidden_size = ssl_config.hidden_size
-        self.use_all_layers = config.use_all_layers
 
         if self.use_all_layers:
             self.layer_weights = nn.Parameter(torch.zeros(config.num_ssl_layers))
@@ -139,19 +146,11 @@ class SSLModel(nn.Module):
             input_values = input_values.view(batch_size * num_segments, -1)
 
             with torch.no_grad():
-                outputs = self.ssl_model(
+                ssl_hidden_state = self.ssl_model(
                     input_values=input_values,
                     attention_mask=attention_mask_segment,
                     return_dict=True,
-                )
-                
-                # Whisper
-                if hasattr(outputs, 'last_hidden_state_encoder') and outputs.last_hidden_state_encoder is not None:
-                     ssl_hidden_state = outputs.last_hidden_state_encoder
-                elif hasattr(outputs, 'encoder_last_hidden_state') and outputs.encoder_last_hidden_state is not None:
-                     ssl_hidden_state = outputs.encoder_last_hidden_state
-                else:
-                    ssl_hidden_state = outputs.last_hidden_state  # (bs * num_segments, num_frames, hidden_size)
+                ).last_hidden_state  # (bs * num_segments, num_frames, hidden_size)
 
             frame_mask = self.ssl_model._get_feature_vector_attention_mask(ssl_hidden_state.shape[1], attention_mask_segment) # (bs * num_segments, num_frames)
 

@@ -59,6 +59,7 @@ class FeatureExtractor:
 
             all_pooled_outputs = [[] for _ in range(self.model.config.num_hidden_layers + 1)]
             self.batch_size = 128
+            segments = [s for s in segments if len(s) > 0]
 
             # Process segments in batches
             for i in range(0, num_segments, self.batch_size):

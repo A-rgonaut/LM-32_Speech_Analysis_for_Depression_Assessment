@@ -122,6 +122,7 @@ class Trainer():
                 break
 
         print(f"\nTraining finished for this fold. Best model saved to {model_filename} (Epoch: {best_epoch}, F1 Macro: {best_val_f1:.4f})")
+        return best_val_f1
 
     def save_model(self, model_filename):
         if not os.path.exists(self.config.model_save_dir):

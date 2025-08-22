@@ -105,6 +105,7 @@ class Dataset(TorchDataset):
                 chunk_audio[start_s - first_start : end_s - first_start]
                 for start_s, end_s in segment_indices
             ]
+            segments = [s for s in segments if len(s) > 0]
             segment_samples = int(self.config.max_utt_seconds * self.config.sample_rate)
             
             features = self.feature_extractor(
