@@ -75,17 +75,39 @@ When `hyperparameter_search_mode` is set to `true` for `cnn` or `ssl`, the scrip
 -   At the end of the search, the `saved_models/` directory will contain only the K models from the winning hyperparameter combination.
 
 #### Specific Workflow for the SSL Model
-The `ssl` model follows a two-stage approach to optimize performance and analyze the contribution of each layer:
-1.  **Phase 1: Finding the Optimal Architecture.**
-    -   Set `use_all_layers: true` in `config.yaml`.
-    -   The `scripts.train` script runs a hyperparameter search on `seq_model_type`, `seq_hidden_size`, `learning_rate`, etc.
-    -   During training, the model learns to **dynamically weigh and aggregate features from all layers** of the SSL model.
-    -   The K models and the architecture parameters that achieved the best average F1-score are saved.
-2.  **Phase 2: Single-Layer Analysis.**
-    -   Set `use_all_layers: false` and disable `hyperparameter_search_mode`.
-    -   The `scripts.train` script will now load the best architecture hyperparameters found in Phase 1.
-    -   You can then run K-fold training for a **single layer** at a time by changing the `layer_to_use` parameter in `config.yaml` (e.g., `layer_to_use: 8`).
-    -   This allows you to evaluate the specific F1-score for each layer of the SSL model using the optimal architecture, thereby identifying which layer contains the most relevant information for the task.
+The `ssl` model follows a structured, three-phase workflow to first find the best architecture and then systematically compare different pre-trained models and their layers.
+  
+**Phase 1: Feature Extraction**
+-   **Goal**: Pre-extract and save feature representations from all SSL models you wish to analyze.
+-   **Action**:
+    1.  In `config.yaml`, populate the `ssl.ssl_model_names` list with all desired models (e.g., `'facebook/wav2vec2-base-960h'`, `'microsoft/wavlm-base'`).
+    2.  Run the extraction script:
+        ```bash
+        python -m scripts.feature_extraction
+        ```
+
+**Phase 2: Finding the Optimal Downstream Architecture**
+-   **Goal**: Find the best sequential model (e.g., Transformer, BiLSTM) and its hyperparameters for processing the SSL features. This is done once using a strong reference model.
+-   **Action**:
+    1.  In `config.yaml`, set `active_model: 'ssl'`, `hyperparameter_search_mode: true` and `run_layer_sweep: false`.
+    2.  Specify your single reference model using the **singular** key: `ssl_model_name: 'facebook/wav2vec2-base-960h'`. The `ssl_model_names` list is ignored in this mode.
+    3.  Run the training script to start the grid search:
+        ```bash
+        python -m scripts.train
+        ```
+    4.  **Outcome**: This process will save the best-performing architecture's parameters to `saved_models/ssl/best_params_ssl.json`.
+
+**Phase 3: Automated Sweep for Model and Layer Comparison**
+-   **Goal**: Fairly compare the performance of each layer from each SSL model, using the optimal architecture found in Phase 2.
+-   **Action**:
+    1.  In `config.yaml`, set `hyperparameter_search_mode: false` and `run_layer_sweep: true`.
+    2.  Ensure `ssl_model_names` contains the list of models for which you extracted features in Phase 1.
+    3.  Populate `layers_to_use` with the layer indices you want to test (e.g., `[0, 1, ..., 12]`).
+    4.  Run the training script:
+        ```bash
+        python -m scripts.train
+        ```
+    5.  **Outcome**: The script will automatically iterate through every model and layer combination, run a full K-fold cross-validation for each, and save the trained models in structured directories (e.g., `saved_models/ssl/microsoft-wavlm-base/layer8/`). A final summary of all F1-scores will be printed and saved to `results/ssl/ssl_layer_sweep_summary.csv`, ready for plotting and analysis.
 
 ### 5. Model Testing
 Similar to training, the testing script is unified and relies on the configuration in `config.yaml`. It loads the K saved models and runs an evaluation on the test set, reporting the mean metrics and standard deviation.

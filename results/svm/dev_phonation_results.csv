@@ -1,0 +1,8 @@
+Metric,value
+accuracy,0.6
+f1_macro,0.5561594202898551
+roc_auc,0.5833333333333334
+sensitivity,0.4166666666666667
+specificity,0.6956521739130435
+f1_depression,0.4166666666666667
+feature_type,phonation

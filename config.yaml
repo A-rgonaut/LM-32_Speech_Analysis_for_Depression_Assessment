@@ -1,6 +1,6 @@
 common:
   active_model: 'ssl' # 'svm', 'cnn', 'ssl', model to train/test
-  use_comet: false
+  use_comet: true
   edaic_aug: false
   seed: 42
   sample_rate: 16000
@@ -15,7 +15,7 @@ common:
   eval_strategy: 'majority'
   segmentation_strategy: 'transcript'
   balance_train_set: true
-
+  
   early_stopping_patience: 5
   early_stopping_min_delta: 0.01
   early_stopping_mode: 'max'
@@ -33,29 +33,35 @@ cnn:
   learning_rate: [0.0001, 0.00005]
 
 ssl:
-  hyperparameter_search_mode: true
+  hyperparameter_search_mode: false
+  run_layer_sweep: true
   max_utt_seconds: 10.0
   min_utt_seconds: 0.1
   overlap_seconds: 0.0
 
   use_preextracted_features: true
-  use_all_layers: false
-  layer_to_use: 8
+  ssl_model_names: 
+    - 'facebook/wav2vec2-base-960h'
+    - 'microsoft/wavlm-base'
+    - 'facebook/hubert-base-ls960'
+    - 'openai/whisper-small'
+  layers_to_use: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  # This will be ignored when run_layer_sweep is true, but keep it for single runs
+  layer_to_use: 8 
+  # This will also be ignored and replaced by the list items
   ssl_model_name: 'facebook/wav2vec2-base-960h'
-  #ssl_model_name: "openai/whisper-small" 
-  #ssl_model_name: 'microsoft/wavlm-base'
-  #ssl_model_name: 'facebook/hubert-base-ls960'
   
   feature_path: "features/"
-  chunk_segments: [10, 5]
-  chunk_overlap_segments: [0, 2]
-  seq_model_type: ['transformer', 'bilstm']
-  seq_hidden_size: [128]
-  learning_rate: [0.0001, 0.00001]
+  use_all_layers: false
+  chunk_segments: [15, 10, 5]
+  chunk_overlap_segments: [0, 2, 4]
+  seq_model_type: ['transformer']
+  seq_hidden_size: [64, 128]
+  learning_rate: [0.00005, 0.00001]
   dropout_rate: [0.1, 0.2]
-  seq_num_layers: [2]
-  transformer_nhead: [4]
-  batch_size: [16]
+  seq_num_layers: [1, 2]
+  transformer_nhead: 4
+  batch_size: [16, 32]
   
 svm:
   feature_types: ['articulation', 'phonation', 'prosody', 'combined']

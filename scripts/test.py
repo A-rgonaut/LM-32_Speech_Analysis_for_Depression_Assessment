@@ -1,4 +1,7 @@
 import numpy as np
+import copy
+import os
+import json
 
 from src.config_loader import load_config
 from src.evaluator import Evaluator
@@ -7,14 +10,26 @@ from src.utils import set_seed
 def main():
     config = load_config()
     set_seed(config.seed)
+    if config.active_model in ['cnn', 'ssl']:
+        params_filename = f'best_params_{config.active_model}.json'
+        path = config.model_save_dir
+        if config.active_model == 'ssl':
+            path = path.split("ssl")[0] + "ssl"
+        params_path = os.path.join(path, params_filename)
+
+        if os.path.exists(params_path):
+            with open(params_path, 'r') as f:
+                best_params = json.load(f)
+            for key, value in best_params.items():
+                setattr(config, key, value)
+                print(key,value)
+                
     if config.active_model == 'svm':
         from src.svm_module.data_loader import DataLoader
     elif config.active_model == 'cnn':
         from src.cnn_module.data_loader import DataLoader
     elif config.active_model == 'ssl':
         from src.ssl_module.data_loader import DataLoader
-    elif config.active_model == 'ssl2':
-            from src.ssl_module_2.data_loader import DataLoader
 
     data_loader = DataLoader(config)
 
@@ -46,14 +61,50 @@ def main():
             evaluator = Evaluator(config, (test_X, test_y))
             evaluator.evaluate('test', feature_type)
     else:
-        test_loader = data_loader.get_data_loader('test')
-        dev_loader = data_loader.get_data_loader('dev')
-        
-        evaluator = Evaluator(config, dev_loader)
-        evaluator.evaluate('dev')
+        if config.active_model == 'ssl' and hasattr(config, 'run_layer_sweep') and config.run_layer_sweep:
+            model_list = config.ssl_model_names if isinstance(config.ssl_model_names, list) else [config.ssl_model_names]
+            layer_list = config.layers_to_use if isinstance(config.layers_to_use, list) else [config.layers_to_use]
 
-        evaluator = Evaluator(config, test_loader)
-        evaluator.evaluate('test')
+            base_model_save_dir = config.model_save_dir.split("ssl/")[0] + "ssl"
+            base_result_dir = config.result_dir.split("ssl/")[0] + "ssl"
+
+            for model_name in model_list:
+                for layer in layer_list:
+                    print(f"\nEvaluating Model: {model_name}, Layer: {layer}")
+
+                    run_config = copy.deepcopy(config)
+                    run_config.ssl_model_name = model_name
+                    run_config.layer_to_use = layer
+                    run_config.use_all_layers = False
+                    for key, value in best_params.items():
+                        setattr(run_config, key, value)
+
+                    ssl_model_name_path = model_name.replace('/', '-')
+                    run_config.feature_path = f"features/{ssl_model_name_path}"
+                    run_config.model_save_dir = os.path.join(base_model_save_dir, ssl_model_name_path, f"layer{layer}")
+                    run_config.result_dir = os.path.join(base_result_dir, ssl_model_name_path, f"layer{layer}")
+
+                    ssl_model_name_path = model_name.replace('/', '-')
+                    run_config.feature_path = f"features/{ssl_model_name_path}"
+
+                    data_loader = DataLoader(run_config)
+                    test_loader = data_loader.get_data_loader('test')
+                    dev_loader = data_loader.get_data_loader('dev')
+
+                    evaluator = Evaluator(run_config, dev_loader)
+                    evaluator.evaluate('dev')
+
+                    evaluator = Evaluator(run_config, test_loader)
+                    evaluator.evaluate('test')
+        else:
+            test_loader = data_loader.get_data_loader('test')
+            dev_loader = data_loader.get_data_loader('dev')
+            
+            evaluator = Evaluator(config, dev_loader)
+            evaluator.evaluate('dev')
+
+            evaluator = Evaluator(config, test_loader)
+            evaluator.evaluate('test')
 
 if __name__ == "__main__":
     main()

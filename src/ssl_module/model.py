@@ -101,11 +101,22 @@ class SSLModel(nn.Module):
         self.init_weights()
     
     def init_weights(self):
-        for name, param in self.classifier.named_parameters():
-            if 'weight' in name and len(param.shape) > 1:
-                nn.init.xavier_normal_(param)
-            elif 'bias' in name:
-                nn.init.constant_(param, 0)
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_normal_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+            elif isinstance(module, nn.LSTM):
+                for name, param in module.named_parameters():
+                    if 'weight_ih' in name:
+                        nn.init.xavier_uniform_(param.data)
+                    elif 'weight_hh' in name:
+                        nn.init.orthogonal_(param.data)
+                    elif 'bias' in name:
+                        param.data.fill_(0)
+            elif isinstance(module, nn.LayerNorm):
+                module.bias.data.zero_()
+                module.weight.data.fill_(1.0)
     
     def forward(self, batch):
         frame_mask = None

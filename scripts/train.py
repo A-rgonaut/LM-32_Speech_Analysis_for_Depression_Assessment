@@ -2,6 +2,7 @@ import os
 import random
 import numpy as np
 import itertools
+import pandas as pd
 import copy
 import json
 from dotenv import load_dotenv
@@ -111,7 +112,9 @@ def _train_pytorch_segment_cv(config, experiment):
             print(f"  Trainable parameters: {trainable_params/1e6:.2f}M")
         
         trainer = Trainer(model, train_loader, val_loader, config)
-        model_filename = f'temp_{model_name}_model_fold_{fold + 1}.pth'
+        if config.hyperparameter_search_mode:
+            model_filename = f'temp_{model_name}_model_fold_{fold + 1}.pth'
+        else: model_filename = f'{model_name}_model_fold_{fold + 1}.pth'
         best_fold_f1 = 0
         
         if experiment:
@@ -177,7 +180,9 @@ def _train_pytorch_participant_cv(config, experiment):
             print(f"  Trainable parameters: {trainable_params/1e6:.2f}M")
 
         trainer = Trainer(model, train_loader, val_loader, config)
-        model_filename = f'temp_{model_name}_model_fold_{fold + 1}.pth'
+        if config.hyperparameter_search_mode:
+            model_filename = f'temp_{model_name}_model_fold_{fold + 1}.pth'
+        else: model_filename = f'{model_name}_model_fold_{fold + 1}.pth'
         best_fold_f1 = 0
 
         if experiment:
@@ -207,6 +212,11 @@ def main():
             project_name=os.getenv("COMET_PROJECT_NAME"),
             workspace=os.getenv("COMET_WORKSPACE")
         )
+        if hasattr(config, 'run_layer_sweep') and config.run_layer_sweep:
+            experiment.log_parameters({
+                "sweep_models": config.ssl_model_names,
+                "sweep_layers": config.layers_to_use
+            })
 
     if config.active_model == 'svm':
         _train_svm(config)
@@ -215,6 +225,7 @@ def main():
             print("Starting Hyperparameter Search for CNN model...")
             best_score = -1
             best_params = {}
+            best_model_paths = []
 
             param_combinations = list(itertools.product(
                 config.dropout_rate,
@@ -229,6 +240,9 @@ def main():
                 run_config = copy.deepcopy(config)
                 dropout, lr, batch_size, seg_strat, max_utt, overlap = params
                 if overlap >= max_utt:
+                    continue
+
+                if max_utt == 3.0 and overlap == 2.5:
                     continue
 
                 run_config.dropout_rate = dropout
@@ -285,7 +299,38 @@ def main():
         else:
             _train_pytorch_segment_cv(config, experiment)
     elif config.active_model == 'ssl':
-        if config.hyperparameter_search_mode:
+        if hasattr(config, 'run_layer_sweep') and config.run_layer_sweep:
+            print("Starting SSL Model/Layer Sweep")
+            
+            model_list = config.ssl_model_names if isinstance(config.ssl_model_names, list) else [config.ssl_model_names]
+            layer_list = config.layers_to_use if isinstance(config.layers_to_use, list) else [config.layers_to_use]
+            
+            base_ssl_dir = config.model_save_dir.split("ssl")[0] + "ssl"
+            params_path = os.path.join(base_ssl_dir, 'best_params_ssl.json')
+            with open(params_path, 'r') as f:
+                best_params = json.load(f)
+
+            for model_name in model_list:
+                for layer in layer_list:
+                    print(f"Training model: {model_name}, using layer: {layer}")
+                    
+                    run_config = copy.deepcopy(config)
+                    run_config.ssl_model_name = model_name
+                    run_config.layer_to_use = layer
+                    run_config.use_all_layers = False
+                    for key, value in best_params.items():
+                        setattr(run_config, key, value)
+                    
+                    ssl_model_name_path = model_name.replace('/', '-')
+                    run_config.feature_path = f"features/{ssl_model_name_path}"
+                    run_config.model_save_dir = os.path.join(base_ssl_dir, f"layer{layer}")
+                    run_config.result_dir = os.path.join(base_ssl_dir.replace('saved_models', 'results'), base_ssl_dir, f"layer{layer}")
+
+                    avg_f1, _  = _train_pytorch_participant_cv(run_config, experiment)
+
+                    if experiment:
+                        experiment.log_metric(f"f1_layer_{layer}", avg_f1, step=model_list.index(model_name))
+        elif config.hyperparameter_search_mode:
             print("Starting Hyperparameter Search for SSL model...")
             best_score = -1
             best_params = {}
@@ -295,21 +340,28 @@ def main():
             base_params = list(itertools.product(
                 config.seq_model_type, config.seq_hidden_size, config.learning_rate,
                 config.dropout_rate, config.seq_num_layers, config.batch_size,
-                config.chunk_segments, config.chunk_overlap_segments
+                config.chunk_segments, config.chunk_overlap_segments,
             ))
 
             for (seq_type, hidden_size, lr, dropout, num_layers, batch_size, chunk_seg, chunk_over) in base_params:
                 if chunk_over >= chunk_seg:
                     continue
                 if seq_type == 'transformer':
-                    for nhead in config.transformer_nhead:
-                        all_param_combinations.append((seq_type, hidden_size, lr, dropout, num_layers, batch_size, chunk_seg, chunk_over, nhead))
+                    if hidden_size == 64:
+                        nhead = 2
+                    elif hidden_size == 128:
+                        nhead = 4
+                    else:
+                        nhead = config.transformer_nhead
+                    all_param_combinations.append((seq_type, hidden_size, lr, dropout, num_layers, batch_size, chunk_seg, chunk_over, nhead))
                 elif seq_type == 'bilstm':
                     all_param_combinations.append((seq_type, hidden_size, lr, dropout, num_layers, batch_size, chunk_seg, chunk_over, None))
 
             for i, params in enumerate(all_param_combinations):
                 run_config = copy.deepcopy(config)
                 seq_type, hidden_size, lr, dropout, num_layers, batch_size, chunk_seg, chunk_over, nhead = params
+                if chunk_seg == 5 and chunk_over == 4:
+                    continue
 
                 run_config.use_all_layers = True
                 run_config.seq_model_type = seq_type
@@ -323,9 +375,9 @@ def main():
                 if nhead is not None: run_config.transformer_nhead = nhead
                 
                 current_params = {
-                    'seq_model_type': seq_type, 'seq_hidden_size': hidden_size, 'learning_rate': lr,
-                    'dropout_rate': dropout, 'seq_num_layers': num_layers, 'batch_size': batch_size,
-                    'chunk_segments': chunk_seg, 'chunk_overlap_segments': chunk_over,
+                    'seq_model_type': seq_type, 'seq_hidden_size': hidden_size, 
+                    'learning_rate': lr, 'dropout_rate': dropout, 'seq_num_layers': num_layers, 
+                    'batch_size': batch_size, 'chunk_segments': chunk_seg, 'chunk_overlap_segments': chunk_over,
                     'transformer_nhead': nhead
                 }
 
@@ -359,13 +411,15 @@ def main():
             print("\nHyperparameter Search Finished")
             print(f"Best F1 score: {best_score:.4f}")
             print(f"Best parameters: {best_params}")
-            params_path = os.path.join(config.model_save_dir, 'best_params_ssl.json')
+            path = config.model_save_dir.split("ssl")[0] + "ssl"
+            params_path = os.path.join(path, 'best_params_ssl.json')
             os.makedirs(os.path.dirname(params_path), exist_ok=True)
             with open(params_path, 'w') as f:
                 json.dump(best_params, f, indent=4)
             print(f"Best SSL architecture parameters saved to {params_path}")
         else:
-            params_path = os.path.join(config.model_save_dir, 'best_params_ssl.json')
+            path = config.model_save_dir.split("ssl")[0] + "ssl"
+            params_path = os.path.join(path, 'best_params_ssl.json')
             if not os.path.exists(params_path):
                 print("Please run the script with 'hyperparameter_search_mode: true' first.")
                 return

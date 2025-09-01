@@ -32,14 +32,19 @@ def load_config(config_path: str = './config.yaml') -> Config:
     ssl_model_name = final_config.get('ssl_model_name', '').replace('/', '-')
     if ssl_model_name:
         final_config['feature_path'] += ssl_model_name
-    if model_type == 'ssl' and not final_config.get('use_all_layers', False):
+    if model_type == 'ssl':
         layer_to_use = final_config.get('layer_to_use', None)
-        if layer_to_use is not None:
-            final_config["model_save_dir"] += f"ssl/{ssl_model_name}/layer{layer_to_use}"
-            final_config["result_dir"] += f"ssl/{ssl_model_name}/layer{layer_to_use}"
+        use_single_layer_path = (
+            layer_to_use is not None and 
+            not final_config.get('use_all_layers', False) and 
+            not final_config.get('hyperparameter_search_mode', False)
+        )
+        if use_single_layer_path:
+            final_config["model_save_dir"] += f"{model_type}/{ssl_model_name}/layer{layer_to_use}"
+            final_config["result_dir"] += f"{model_type}/{ssl_model_name}/layer{layer_to_use}"
         else:
-            final_config["model_save_dir"] += model_type
-            final_config["result_dir"] += model_type
+            final_config["model_save_dir"] += f"{model_type}/{ssl_model_name}"
+            final_config["result_dir"] += f"{model_type}/{ssl_model_name}"
     else:
         final_config["model_save_dir"] += model_type
         final_config["result_dir"] += model_type
