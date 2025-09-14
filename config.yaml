@@ -22,6 +22,10 @@ common:
   gradient_accumulation_steps: 1
   epochs: 20
 
+  # Ablation options:
+  pooling_type: 'gated_attention' # 'gated_attention', 'mean', 'attention'
+  use_seq_model: true
+
 cnn:
   hyperparameter_search_mode: true
   segmentation_strategy: ['transcript', 'fixed_length']
@@ -34,7 +38,7 @@ cnn:
 
 ssl:
   hyperparameter_search_mode: false
-  run_layer_sweep: true
+  run_layer_sweep: false
   max_utt_seconds: 10.0
   min_utt_seconds: 0.1
   overlap_seconds: 0.0
@@ -47,7 +51,7 @@ ssl:
     - 'openai/whisper-small'
   layers_to_use: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
   # This will be ignored when run_layer_sweep is true, but keep it for single runs
-  layer_to_use: 8 
+  layer_to_use: 8
   # This will also be ignored and replaced by the list items
   ssl_model_name: 'facebook/wav2vec2-base-960h'
   

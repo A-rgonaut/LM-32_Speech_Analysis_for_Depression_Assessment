@@ -1,9 +1,6 @@
-# FILE: ./scripts/plot_results.py
-
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os
 import re
 from pathlib import Path
 

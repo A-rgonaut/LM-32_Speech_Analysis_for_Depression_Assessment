@@ -223,6 +223,7 @@ def main():
     elif config.active_model == 'cnn':
         if config.hyperparameter_search_mode:
             print("Starting Hyperparameter Search for CNN model...")
+            set_seed(config.seed)
             best_score = -1
             best_params = {}
             best_model_paths = []
@@ -313,7 +314,7 @@ def main():
             for model_name in model_list:
                 for layer in layer_list:
                     print(f"Training model: {model_name}, using layer: {layer}")
-                    
+                    set_seed(config.seed)
                     run_config = copy.deepcopy(config)
                     run_config.ssl_model_name = model_name
                     run_config.layer_to_use = layer
@@ -323,8 +324,10 @@ def main():
                     
                     ssl_model_name_path = model_name.replace('/', '-')
                     run_config.feature_path = f"features/{ssl_model_name_path}"
-                    run_config.model_save_dir = os.path.join(base_ssl_dir, f"layer{layer}")
-                    run_config.result_dir = os.path.join(base_ssl_dir.replace('saved_models', 'results'), base_ssl_dir, f"layer{layer}")
+                    ssl_model_name_path = model_name.replace('/', '-')
+                    run_config.model_save_dir = os.path.join(base_ssl_dir, ssl_model_name_path, f"layer{layer}")
+                    base_result_dir = base_ssl_dir.replace('saved_models', 'results')
+                    run_config.result_dir = os.path.join(base_result_dir, ssl_model_name_path, f"layer{layer}")
 
                     avg_f1, _  = _train_pytorch_participant_cv(run_config, experiment)
 
@@ -332,6 +335,7 @@ def main():
                         experiment.log_metric(f"f1_layer_{layer}", avg_f1, step=model_list.index(model_name))
         elif config.hyperparameter_search_mode:
             print("Starting Hyperparameter Search for SSL model...")
+            set_seed(config.seed)
             best_score = -1
             best_params = {}
             best_model_paths = []

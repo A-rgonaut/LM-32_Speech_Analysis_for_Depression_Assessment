@@ -1,0 +1,7 @@
+Metric,mean,std
+accuracy,0.7021276595744681,0.0
+f1_macro,0.4125,0.0
+roc_auc,0.5385281385281385,0.05593050138666593
+sensitivity,0.0,0.0
+specificity,1.0,0.0
+f1_depression,0.0,0.0

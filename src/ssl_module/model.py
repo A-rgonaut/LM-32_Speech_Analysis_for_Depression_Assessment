@@ -8,6 +8,7 @@ from ..pooling_layers import AttentionPoolingLayer, MeanPoolingLayer, GatedAtten
 class SSLModel(nn.Module):
     def __init__(self, config):
         super(SSLModel, self).__init__()
+        self.use_seq_model = config.use_seq_model
 
         # SSL model loading & config
         self.use_preextracted_features = config.use_preextracted_features
@@ -31,15 +32,16 @@ class SSLModel(nn.Module):
                 param.requires_grad = False
             
             # Segment-level pooling
-            #'''
-            self.segment_embeddings_pooling = GatedAttentionPoolingLayer(
-                embed_dim=self.ssl_hidden_size,
-                attn_dim=self.ssl_hidden_size // 2,
-                return_weights=False
-            )
-            #'''
-            #self.segment_embeddings_pooling = AttentionPoolingLayer(embed_dim=self.ssl_hidden_size)
-            #self.segment_embeddings_pooling = MeanPoolingLayer()
+            if config.pooling_type == 'gated_attention':
+                self.segment_embeddings_pooling = GatedAttentionPoolingLayer(
+                    embed_dim=self.ssl_hidden_size,
+                    attn_dim=self.ssl_hidden_size // 2,
+                    return_weights=False
+                )
+            elif config.pooling_type == 'mean':
+                self.segment_embeddings_pooling = MeanPoolingLayer()
+            elif config.pooling_type == 'attention':
+                self.segment_embeddings_pooling = AttentionPoolingLayer(embed_dim=self.ssl_hidden_size)
 
         ssl_config = AutoConfig.from_pretrained(config.ssl_model_name)
         self.ssl_hidden_size = ssl_config.hidden_size
@@ -52,47 +54,52 @@ class SSLModel(nn.Module):
 
         self.segment_embedding_dim = self.ssl_hidden_size
 
-        # Add a projection layer to reduce dimensionality
-        self.projection = nn.Linear(self.segment_embedding_dim, config.seq_hidden_size)
+        if self.use_seq_model:
+            # Add a projection layer to reduce dimensionality
+            self.projection = nn.Linear(self.segment_embedding_dim, config.seq_hidden_size)
 
-        self.seq_model_type = config.seq_model_type
-        self.seq_hidden_size = config.seq_hidden_size
-        self.dropout = config.dropout_rate
-        self.num_layers = config.seq_num_layers
+            self.seq_model_type = config.seq_model_type
+            self.seq_hidden_size = config.seq_hidden_size
+            self.dropout = config.dropout_rate
+            self.num_layers = config.seq_num_layers
 
-        if self.seq_model_type == 'transformer':
-            encoder_layer = nn.TransformerEncoderLayer(
-                d_model=self.seq_hidden_size,
-                nhead=config.transformer_nhead,  # nhead must be a divisor of d_model (e.g. 768 % 4 == 0)
-                dim_feedforward=self.seq_hidden_size * 2,
-                dropout=self.dropout,
-                activation='relu',
-                batch_first=True 
+            if self.seq_model_type == 'transformer':
+                encoder_layer = nn.TransformerEncoderLayer(
+                    d_model=self.seq_hidden_size,
+                    nhead=config.transformer_nhead,
+                    dim_feedforward=self.seq_hidden_size * 2,
+                    dropout=self.dropout,
+                    activation='relu',
+                    batch_first=True 
+                )
+                self.sequence_model = nn.TransformerEncoder(encoder_layer, num_layers=self.num_layers)
+                self.seq_output_dim = self.seq_hidden_size
+            elif self.seq_model_type == 'bilstm':
+                self.sequence_model = nn.LSTM(
+                    input_size=self.seq_hidden_size,
+                    hidden_size=self.seq_hidden_size,
+                    num_layers=self.num_layers,
+                    dropout=self.dropout if self.num_layers > 1 else 0.0,
+                    bidirectional=True,
+                    batch_first=True
+                )
+                self.seq_output_dim = self.seq_hidden_size * 2
+            pooling_input_dim = self.seq_output_dim
+        else:
+            pooling_input_dim = self.segment_embedding_dim
+
+        if config.pooling_type == 'gated_attention':
+            self.audio_embedding_pooling = GatedAttentionPoolingLayer(
+                embed_dim=pooling_input_dim,
+                attn_dim=pooling_input_dim // 2,
+                return_weights=False
             )
-            self.sequence_model = nn.TransformerEncoder(encoder_layer, num_layers=self.num_layers)
-            self.seq_output_dim = self.seq_hidden_size
-        elif self.seq_model_type == 'bilstm':
-            self.sequence_model = nn.LSTM(
-                input_size=self.seq_hidden_size,
-                hidden_size=self.seq_hidden_size,
-                num_layers=self.num_layers,
-                dropout=self.dropout if self.num_layers > 1 else 0.0,
-                bidirectional=True,
-                batch_first=True
-            )
-            self.seq_output_dim = self.seq_hidden_size * 2
+        elif config.pooling_type == 'mean':
+            self.audio_embedding_pooling = MeanPoolingLayer()
+        elif config.pooling_type == 'attention':
+            self.audio_embedding_pooling = AttentionPoolingLayer(embed_dim=pooling_input_dim)
 
-        #'''
-        self.audio_embedding_pooling = GatedAttentionPoolingLayer(
-            embed_dim=self.seq_output_dim,
-            attn_dim=self.seq_output_dim // 2,
-            return_weights=False
-        )
-        #'''
-        #self.audio_embedding_pooling = MeanPoolingLayer()
-        #self.audio_embedding_pooling = AttentionPoolingLayer(embed_dim=self.seq_output_dim)
-
-        self.audio_embedding_dim = self.seq_output_dim
+        self.audio_embedding_dim = pooling_input_dim
 
         self.classifier = nn.Sequential(
             nn.Linear(self.audio_embedding_dim, 1),
@@ -172,26 +179,29 @@ class SSLModel(nn.Module):
             # Un-flatten the batch to restore sequence structure 
             # Reshape from (bs * num_segments, segment_embedding_dim) back to (bs, num_segments, segment_embedding_dim)
             segment_embeddings = segment_embeddings.view(batch_size, num_segments, self.segment_embedding_dim)
-
-        # Project embeddings to the desired dimension for the sequence model
-        projected_embeddings = self.projection(segment_embeddings) # (bs, num_segments, seq_hidden_size)
-
-        # Sequence modeling across segments
-        # Process the sequence of segment embeddings for each audio file.
-        if self.seq_model_type == 'transformer':
-            sequence_output = self.sequence_model(projected_embeddings, src_key_padding_mask=chunk_padding_mask)  # (bs, T, H)
-        elif self.seq_model_type == 'bilstm':
-            lengths = (~chunk_padding_mask).sum(dim=1).clamp(min=1)  # (bs,)
-            packed = nn.utils.rnn.pack_padded_sequence(
-                projected_embeddings, lengths.cpu(), batch_first=True, enforce_sorted=False
-            )
-            packed_output, _ = self.sequence_model(packed)
-            sequence_output, _ = nn.utils.rnn.pad_packed_sequence(
-                packed_output, batch_first=True, total_length=projected_embeddings.size(1)
-            )  # (bs, T, H or H*2)
+        
+        if self.use_seq_model:
+            # Project embeddings to the desired dimension for the sequence model
+            projected_embeddings = self.projection(segment_embeddings) # (bs, num_segments, seq_hidden_size)
+             # Sequence modeling across segments
+            # Process the sequence of segment embeddings for each audio file.
+            if self.seq_model_type == 'transformer':
+                sequence_output = self.sequence_model(projected_embeddings, src_key_padding_mask=chunk_padding_mask)  # (bs, T, H)
+            elif self.seq_model_type == 'bilstm':
+                lengths = (~chunk_padding_mask).sum(dim=1).clamp(min=1)  # (bs,)
+                packed = nn.utils.rnn.pack_padded_sequence(
+                    projected_embeddings, lengths.cpu(), batch_first=True, enforce_sorted=False
+                )
+                packed_output, _ = self.sequence_model(packed)
+                sequence_output, _ = nn.utils.rnn.pad_packed_sequence(
+                    packed_output, batch_first=True, total_length=projected_embeddings.size(1)
+                )  # (bs, T, H or H*2)
+            final_sequence_repr = sequence_output
+        else:
+            final_sequence_repr = segment_embeddings
 
         # Pool segment-level outputs to get a single audio-level representation
-        audio_embeddings = self.audio_embedding_pooling(sequence_output, mask=chunk_padding_mask)  # (bs, audio_embedding_dim)
+        audio_embeddings = self.audio_embedding_pooling(final_sequence_repr, mask=chunk_padding_mask)  # (bs, audio_embedding_dim)
 
         logits = self.classifier(audio_embeddings)  # (bs, 1)
 

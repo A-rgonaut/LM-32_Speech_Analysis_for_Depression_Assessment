@@ -107,8 +107,14 @@ The `ssl` model follows a structured, three-phase workflow to first find the bes
         ```bash
         python -m scripts.train
         ```
-    5.  **Outcome**: The script will automatically iterate through every model and layer combination, run a full K-fold cross-validation for each, and save the trained models in structured directories (e.g., `saved_models/ssl/microsoft-wavlm-base/layer8/`). A final summary of all F1-scores will be printed and saved to `results/ssl/ssl_layer_sweep_summary.csv`, ready for plotting and analysis.
-
+    5.  Run the testing script: After training is complete, run the test script to evaluate all models on the held-out dev and test set.
+        ```bash
+        python -m scripts.test
+        ```
+    6. Run the results plotting script to visualize the performance across different models and layers.
+        ```bash
+        python -m scripts.plot_results
+        ```
 ### 5. Model Testing
 Similar to training, the testing script is unified and relies on the configuration in `config.yaml`. It loads the K saved models and runs an evaluation on the test set, reporting the mean metrics and standard deviation.
 
